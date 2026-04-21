@@ -2,170 +2,133 @@
   <img src="docs/logo.png" width="220" alt="Spikenaut">
 </p>
 
-<h1 align="center">spikenaut-router</h1>
-<p align="center">SNN-based sparse domain routing — the Anti-Hallucination Layer</p>
+<h1 align="center">synaptic-mesh</h1>
+<p align="center">SNN wiring, topology generation, and temporal delay infrastructure</p>
 
 <p align="center">
-  <a href="https://crates.io/crates/spikenaut-router"><img src="https://img.shields.io/crates/v/spikenaut-router" alt="crates.io"></a>
-  <a href="https://docs.rs/spikenaut-router"><img src="https://docs.rs/spikenaut-router/badge.svg" alt="docs.rs"></a>
+ <img src="https://img.shields.io/crates/v/synapse-router" alt="crates.io"></a>
+  <a href="https://docs.rs/synapse-router"><img src="https://docs.rs/synapse-router/badge.svg" alt="docs.rs"></a>
   <img src="https://img.shields.io/badge/license-GPL--3.0-orange" alt="GPL-3.0">
 </p>
 
 ---
 
-A small LIF network acts as a neural router: it classifies incoming signals into domain
-categories and activates only the relevant processing pipelines. Only neurons that
-actually fire trigger downstream computation — sparse activation by design.
+`synaptic-mesh` manages the wiring, topology, and temporal delays between neurons in the Spikenaut SNN ecosystem. It provides high-performance, deterministic graph generators (Small-World, Scale-Free, Layered) and a temporal delay infrastructure that simulates realistic axonal propagation.
 
-## Features
+## Core Capabilities
 
-- `AhlRouter` — 3-neuron LIF bank routing over `Chemistry`, `Mathematics`, `DigitalLogic`
-- `DomainSignals::from_text(text)` — keyword-density feature extraction
-- `RoutingDecision` — activation mask + per-domain confidence scores
-- STDP-based online refinement (correct dispatches potentiate, failures depress)
-- Winner-take-all lateral inhibition between domain neurons
-- Configurable `MIN_FIRE_RATE` sparse-activation floor
-- **CSR Sparse Synaptic Map** — Compressed Sparse Row format for Blackwell-optimized GPU execution (20× VRAM reduction at 5% sparsity)
-- **SAAQ Telemetry Integration** — adaptation-aware routing that steers traffic away from exhausted neurons toward fresh ones
-- **Ballast-Lab Feedback Loop** — CSV telemetry export for Julia symbolic regression to discover optimal routing policies
-- **RoutingPolicy** — configurable policy equation (`α·spikes − β·adaptation − γ·quant_error + δ·base_weight`)
+- **Topology Generators** — Deterministic generation of Erdős–Rényi (random), Watts–Strogatz (small-world), Barabási–Albert (scale-free), and Layered feed-forward topologies.
+- **Temporal Propation** — Per-synapse axonal delays stored alongside weights. Spikes are delivered at the correct future tick via a high-performance ring-buffer queue.
+- **Biologically Inspired Wiring** — Support for Dale's Law (fixed neuron polarity) and position-based distance-dependent connectivity.
+- **Sparse Synaptic Map (CSR)** — Compressed Sparse Row format for memory-efficient weight storage (20× reduction for sparse networks).
+- **AHL Domain Router** — A specialized consumer of synaptic wiring used for sparse Anti-Hallucination Layer classification in LLM pipelines.
 
 ## Installation
 
 ```toml
-spikenaut-router = "0.1"
+synapse-router = "0.2"
 ```
 
-## Quick Start
+## Quick Start: Building a Mesh
 
 ```rust
-use spikenaut_router::AhlRouter;
+use synapse_router::topology::generators::generate_small_world;
+use synapse_router::mesh::SynapticMesh;
+
+// 1. Build a 1024-neuron small-world network with delays up to 10 ticks
+// (N=1024, k=6 neighbors, beta=0.1 rewiring, max_delay=10, inh_fraction=0.2)
+let graph = generate_small_world(1024, 6, 0.1, 10, 0.2).unwrap();
+
+// 2. Wrap in a Mesh orchestrator that manages temporal state
+let mut mesh = SynapticMesh::new(graph);
+
+// 3. Each tick: provide current spikes -> receive time-delayed synaptic currents
+let mut spikes = vec![false; 1024];
+spikes[0] = true; // neuron 0 fires
+
+let currents = mesh.propagate(&spikes).unwrap();
+// currents[i] = total incoming synaptic current at neuron i this tick,
+// potentially including delayed spikes from previous ticks.
+```
+
+## Topology Generation
+
+`synaptic-mesh` provides several deterministic models for growing network graphs. All generators use golden-ratio fractional hashing for reproducibility across runs without external RNG dependencies.
+
+| Model | Generator | Best For |
+|-------|-----------|----------|
+| **Small-World** | `generate_small_world` | Local clustering with short path lengths (mimics cortical connectivity). |
+| **Scale-Free** | `generate_scale_free` | Networks with "hubs" following a power-law degree distribution. |
+| **Random** | `generate_random` | Erdős–Rényi random graphs for baseline comparisons. |
+| **Layered** | `generate_layered` | Classical feed-forward structures (Input -> Hidden -> Output). |
+
+## Temporal Delays & Spike Propagation
+
+In biological networks, spikes do not arrive instantly. `synaptic-mesh` implements a temporal logic layer using a **Ring-Buffer Delay Queue**:
+
+1.  Each synapse in the `SynapticGraph` stores a `DelayTicks` value.
+2.  When a neuron fires, its spike is projected through its outgoing synapses.
+3.  The `SpikeDelayBuffer` schedules delivery at `current_tick + delay`.
+4.  At each tick, `propagate()` drains the current slot and returns the accumulated currents.
+
+This enables complex temporal dynamics like polychronization and coincidence detection.
+
+## Anti-Hallucination Layer (AHL) Router
+
+The crate includes `AhlRouter`, a specialized application that uses a small SNN for text-domain classification.
+
+```rust
+use synapse_router::AhlRouter;
 
 let mut router = AhlRouter::new();
-
 let decision = router.route("solve the differential equation dy/dx = sin(x)");
-// decision.active_domains   → [Mathematics]
-// decision.firing_rates     → [0.0, 0.87, 0.0]
-// decision.input_signals    → DomainSignals { chemistry: 0.0, mathematics: 0.875, .. }
 
-// Reinforce correct routing (potentiates the Mathematics neuron)
-router.apply_feedback(VerificationDomain::Mathematics, 1.0);
+// decision.active_domains → [Mathematics]
+// decision.firing_rates   → [0.0, 0.87, 0.0]
 ```
 
-## Sparse Synaptic Map (CSR)
+## SAAQ Adaptation & Ballast-Lab Integration
 
-Replace dense $N \times N$ weight matrices with adjacency lists in Compressed Sparse Row format.
-For a 2048-neuron network at ~5% connectivity, this reduces storage from ~16 MB to ~800 KB.
+- **SAAQ Telemetry** — Adaptation-aware routing that steers traffic away from exhausted neurons.
+- **Ballast-Lab Loop** — Export CSV telemetry for Julia symbolic regression to discover optimal routing policy equations:
+  ```rust
+  let csv = router.telemetry_csv(&telemetry, &firing_rates);
+  // Feed into SR.jl to discover optimal α·spikes - β·adaptation coefficients
+  ```
 
-```rust
-use spikenaut_router::{SparseSynapticMapBuilder, SparseSynapticMap};
+## Architecture
 
-const N: usize = 2048;
-
-let map = SparseSynapticMapBuilder::<N>::new()
-    .with_self_weight(0.9)
-    .with_self_connections()
-    .with_lateral_inhibition(-0.15)
-    .build();
-
-// Export for GPU kernel launch
-let (row_ptr, col_indices, values) = map.to_gpu_arrays();
-
-// Convert from existing dense weights
-let dense = [[0.9; N]; N]; // your dense matrix
-let sparse = SparseSynapticMap::from_dense(&dense, 0.01);
+```text
+┌──────────────────────────────────────────────────┐
+│  Source spike vector  [bool; N]                   │
+└────────────────┬─────────────────────────────────┘
+                 │
+       ┌─────────▼─────────┐
+       │   SynapticGraph   │  CSR adjacency + delays + polarities
+       │   (topology)      │  Generators: random, small-world, etc.
+       └─────────┬─────────┘
+                 │  per-synapse: (target, weight, delay)
+       ┌─────────▼─────────┐
+       │  SpikeDelayBuffer │  Ring-buffer delay queue
+       │   (delay)         │  inject() → advance() → drain()
+       └─────────┬─────────┘
+                 │  tick-aligned delivery
+       ┌─────────▼─────────┐
+       │  Synaptic current │  Vec<f32> of length N
+       │  per target neuron│
+       └───────────────────┘
 ```
 
-## SAAQ Adaptation-Aware Routing
+## References
 
-Route signals using telemetry from the quantization pipeline to avoid adapted (exhausted) neurons:
+**Network Topology & Dynamics:**
+- Watts, D. J. & Strogatz, S. H. (1998). *Collective dynamics of 'small-world' networks.* Nature.
+- Barabási, A.-L. & Albert, R. (1999). *Emergence of scaling in random networks.* Science.
+- Dale, H. H. (1935). *Pharmacology and Nerve-endings.*
 
-```rust
-use spikenaut_router::{AhlRouter, TelemetrySnapshot};
-
-let mut router = AhlRouter::new();
-let mut telemetry = TelemetrySnapshot::new(3);
-
-// Mark Chemistry neuron as heavily adapted (exhausted)
-telemetry.adaptation[0] = 0.9;
-
-// Router modulates stimulus away from adapted neurons
-let decision = router.route_adaptive("Balance NaOH + HCl", &telemetry);
-```
-
-The LIF neuron now tracks adaptation state internally — each spike increases adaptation,
-which decays over time via `adaptation_decay`. The `integrate_adaptive()` method applies
-the modulation: `stimulus_effective = stimulus · (1 − adaptation)`.
-
-## Ballast-Lab Feedback Loop
-
-Export routing telemetry as CSV for Julia symbolic regression to discover optimal routing policies:
-
-```rust
-use spikenaut_router::{AhlRouter, RoutingPolicy};
-
-let mut router = AhlRouter::new();
-let decision = router.route("Balance NaOH + HCl");
-let telemetry = router.capture_telemetry(42);
-
-// Export CSV for Ballast-Lab ingestion
-let csv = router.telemetry_csv(&telemetry, &decision.firing_rates);
-// → "step,domain,adaptation,spike_count,quant_error,firing_rate,active\n..."
-
-// Apply a discovered policy for future routing
-let policy = RoutingPolicy {
-    alpha: 1.2,   // spike count weight
-    beta: 0.7,    // adaptation penalty
-    gamma: 0.4,   // quantization error penalty
-    delta: 0.9,   // base synaptic strength
-    threshold: 0.15,
-    description: "ballast-lab epoch 47".into(),
-};
-
-let decision = router.route_with_policy("Balance NaOH + HCl", &telemetry, &policy);
-```
-
-**The workflow:**
-1. `corinth-canal` logs routing decisions and spike sparsity to `snn_gpu_routing_telemetry.csv`
-2. `ballast-lab` (Julia) performs symbolic regression on that telemetry
-3. Julia discovers an optimal routing policy equation
-4. Update the `RoutingPolicy` parameters with the discovered coefficients
-
-## Routing Model
-
-Each domain neuron integrates keyword-density features from the input:
-
-```
-V_i[t+1] = V_i[t] · (1 − β) + Σ_j W_ij · x_j[t] · (1 − adaptation_i) − Σ_k≠i W_inh · V_k[t]
-```
-
-Fires when `V_i ≥ θ_i`. STDP reward: `ΔW += η·(1−W)` on correct fire, `ΔW -= η·W` on miss.
-Adaptation increases on each spike and decays exponentially: `adaptation ← adaptation · (1 − decay)`.
-
-*Bi & Poo (1998); Maass (2000) — winner-take-all; Lapicque (1907); Stein (1967)*
-
-## Extending to Custom Domains
-
-```rust
-use spikenaut_router::{AhlRouter, VerificationDomain};
-
-// Add your own domain by implementing VerificationDomain
-// and providing keyword sets for feature extraction
-```
-
-## Extracted from Production
-
-Extracted from [Eagle-Lander](https://github.com/rmems/Eagle-Lander), where it served
-as the Anti-Hallucination Layer (AHL) routing verification queries to the correct
-neural lobe. Decoupled from lobe-specific logic so it works as a general sparse router
-for any classification task.
-
-## Part of the Spikenaut Ecosystem
-
-| Library | Purpose |
-|---------|---------|
-| [spikenaut-encoder](https://github.com/rmems/spikenaut-encoder) | Feature → spike encoding |
-| [spikenaut-backend](https://github.com/rmems/spikenaut-backend) | SNN backend abstraction |
+**SNN Logic:**
+- Bi, G. Q., & Poo, M. M. (1998). Synaptic modifications... *Journal of Neuroscience*.
+- Maass, W. (2000). On the computational power of winner-take-all. *Neural Computation*.
 
 ## License
 
