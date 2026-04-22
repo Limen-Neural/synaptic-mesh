@@ -11,8 +11,8 @@
 //! | [`delay`] | Temporal delay infrastructure — ring-buffer spike queues for tick-aligned delivery with configurable axonal propagation delays |
 //! | [`mesh`] | [`SynapticMesh`] orchestrator — the top-level struct owning topology + delays, provides `propagate()` for spike → current conversion |
 //! | [`sparse`] | Compressed Sparse Row (CSR) synaptic maps for GPU-optimized weight matrices |
-//! | [`router`] | AHL (Anti-Hallucination Layer) router — uses a bank of dynamic GIF neurons for LLM domain routing |
-//! | [`gif`] | Generalized Integrate-and-Fire (GIF) neuron model with threshold adaptation |
+//! | [`router`] | AHL (Anti-Hallucination Layer) router — generic SNN router using neuromodulatory neurons |
+//! | [`neuromod`] | Neuromodulatory (NIF) neuron model with gain control |
 //!
 //! ## Quick start
 //!
@@ -58,11 +58,6 @@
 //!
 //! ## References
 //!
-//! **GIF neuron model (Generalized Integrate-and-Fire):**
-//! - Gerstner, W., & Kistler, W. M. (2002). *Spiking Neuron Models: Single Neurons, Populations, Plasticity.* Cambridge University Press.
-//! - Mihalaş, Ş., & Niebur, E. (2009). A generalized linear integrate-and-fire neural model with diverse dynamics. *Neural Computation*.
-//!
-//! **Original LIF neuron model references:**
 //! - Lapicque, L. (1907). *Recherches quantitatives sur l'excitation électrique des
 //!   nerfs traitée comme une polarisation.* Journal de Physiologie et de Pathologie
 //!   Générale, 9, 620–635.
@@ -95,7 +90,7 @@ pub mod error;
 pub mod mesh;
 pub mod topology;
 pub mod types;
-pub mod gif;
+pub mod neuromod;
 
 // ── Existing modules: router + sparse maps ────────────────────────────────────
 pub mod router;
@@ -112,8 +107,9 @@ pub use types::{
     ConnectionModel, DelayModel, DelayTicks, NeuronId, Polarity, SynapseDescriptor, TopologyConfig,
 };
 
+pub use neuromod::NeuromodNeuron;
 // Existing router + sparse exports (backward compatible)
-pub use router::{AhlRouter, DomainSignals, RoutingDecision, VerificationDomain, AHL_NUM_CHANNELS};
+pub use router::{AhlRouter, RoutingDecision, AHL_NUM_CHANNELS};
 pub use sparse::{
     RoutingPolicy, SparseSynapticMap, SparseSynapticMapBuilder, Synapse, TelemetrySnapshot,
 };
