@@ -5,7 +5,7 @@ license = "GPL-3.0-or-later"
 description = "An SNN based mesh for managing the wiring, topology, and temporal delays between neurons."
 repository = "https://github.com/Limen-Neural/synaptic-mesh"
 keywords = ["snn", "neuromorphic", "routing", "lif", "spikenaut"]
-categories = ["science", "algorithms", "text-processing"]
+categories = ["science", "algorithms", "simulation"]
 exclude = ["docs/"]
 
 [dependencies]

@@ -1,7 +1,7 @@
 //! # synaptic-mesh
 //!
-//! Manages the wiring, topology, and temporal delays between neurons in the
-//! Spikenaut SNN ecosystem.
+//! Manages the wiring, topology, and temporal delays between neurons in
+//! spiking neural networks.
 //!
 //! ## Modules
 //!
@@ -11,7 +11,7 @@
 //! | [`delay`] | Temporal delay infrastructure — ring-buffer spike queues for tick-aligned delivery with configurable axonal propagation delays |
 //! | [`mesh`] | [`SynapticMesh`] orchestrator — the top-level struct owning topology + delays, provides `propagate()` for spike → current conversion |
 //! | [`sparse`] | Compressed Sparse Row (CSR) synaptic maps for GPU-optimized weight matrices |
-//! | [`router`] | AHL (Anti-Hallucination Layer) router — generic SNN router using neuromodulatory neurons |
+//! | [`router`] | Generic multi-channel SNN router using neuromodulatory neurons |
 //! | [`neuromod`] | Neuromodulatory (NIF) neuron model with gain control |
 //!
 //! ## Quick start
@@ -108,11 +108,20 @@ pub use types::{
 };
 
 pub use neuromod::NeuromodNeuron;
-// Existing router + sparse exports (backward compatible)
-pub use router::{AhlRouter, RoutingDecision, AHL_NUM_CHANNELS};
+
+// Generic router exports
+pub use router::{ChannelRouter, RouterConfig, RoutingDecision};
+
+// Backward-compatible router exports (deprecated)
+pub use router::{AhlRouter, AHL_NUM_CHANNELS};
+
+// Sparse map exports
 pub use sparse::{
-    RoutingPolicy, SparseSynapticMap, SparseSynapticMapBuilder, Synapse, TelemetrySnapshot,
+    RoutingPolicy, SparseSynapticMap, SparseSynapticMapBuilder, Synapse, NeuronStateSnapshot,
 };
+
+// Backward-compatible sparse exports (deprecated)
+pub use sparse::TelemetrySnapshot;
 
 #[cfg(test)]
 mod tests;

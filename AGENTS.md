@@ -14,8 +14,8 @@ This file contains workflow and orientation notes for AI agents working on this 
 - `src/delay/`: temporal delay infrastructure
   - `ring_buffer.rs`: `SpikeDelayBuffer` — ring-buffer delay queue for tick-aligned spike delivery
 - `src/mesh.rs`: `SynapticMesh` — top-level orchestrator owning graph + delays, provides `propagate()` 
-- `src/router.rs`: `AhlRouter` — AHL (Anti-Hallucination Layer) domain router (consumer of wiring)
-- `src/sparse.rs`: `SparseSynapticMap` CSR format, `TelemetrySnapshot`, `RoutingPolicy`
+- `src/router.rs`: `ChannelRouter` — generic multi-channel SNN router (configurable channel count); `AhlRouter` is a backward-compatible type alias
+- `src/sparse.rs`: `SparseSynapticMap` CSR format, `NeuronStateSnapshot`, `RoutingPolicy`; `TelemetrySnapshot` is a backward-compatible type alias
 - `src/tests.rs`: test suite for router + sparse modules
 
 ## Entry Order

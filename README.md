@@ -1,19 +1,19 @@
 <p align="center">
-  <img src="docs/logo.png" width="220" alt="Spikenaut">
+  <img src="docs/logo.png" width="220" alt="synaptic-mesh">
 </p>
 
 <h1 align="center">synaptic-mesh</h1>
 <p align="center">SNN wiring, topology generation, and temporal delay infrastructure</p>
 
 <p align="center">
- <img src="https://img.shields.io/crates/v/synapse-router" alt="crates.io"></a>
-  <a href="https://docs.rs/synapse-router"><img src="https://docs.rs/synapse-router/badge.svg" alt="docs.rs"></a>
+ <img src="https://img.shields.io/crates/v/synaptic-mesh" alt="crates.io"></a>
+  <a href="https://docs.rs/synaptic-mesh"><img src="https://docs.rs/synaptic-mesh/badge.svg" alt="docs.rs"></a>
   <img src="https://img.shields.io/badge/license-GPL--3.0-orange" alt="GPL-3.0">
 </p>
 
 ---
 
-`synaptic-mesh` manages the wiring, topology, and temporal delays between neurons in the Spikenaut SNN ecosystem. It provides high-performance, deterministic graph generators (Small-World, Scale-Free, Layered) and a temporal delay infrastructure that simulates realistic axonal propagation.
+`synaptic-mesh` manages the wiring, topology, and temporal delays between neurons in spiking neural networks. It provides high-performance, deterministic graph generators (Small-World, Scale-Free, Layered) and a temporal delay infrastructure that simulates realistic axonal propagation.
 
 ## Core Capabilities
 
@@ -21,19 +21,19 @@
 - **Temporal Propation** — Per-synapse axonal delays stored alongside weights. Spikes are delivered at the correct future tick via a high-performance ring-buffer queue.
 - **Biologically Inspired Wiring** — Support for Dale's Law (fixed neuron polarity) and position-based distance-dependent connectivity.
 - **Sparse Synaptic Map (CSR)** — Compressed Sparse Row format for memory-efficient weight storage (20× reduction for sparse networks).
-- **AHL Domain Router** — A specialized consumer of synaptic wiring used for sparse Anti-Hallucination Layer classification in LLM pipelines.
+- **Generic Channel Router** — A configurable multi-channel SNN router using neuromodulatory neurons for sparse signal classification.
 
 ## Installation
 
 ```toml
-synapse-router = "0.2"
+synaptic-mesh = "0.2"
 ```
 
 ## Quick Start: Building a Mesh
 
 ```rust
-use synapse_router::topology::generators::generate_small_world;
-use synapse_router::mesh::SynapticMesh;
+use synaptic_mesh::topology::generators::generate_small_world;
+use synaptic_mesh::mesh::SynapticMesh;
 
 // 1. Build a 1024-neuron small-world network with delays up to 10 ticks
 // (N=1024, k=6 neighbors, beta=0.1 rewiring, max_delay=10, inh_fraction=0.2)
@@ -73,28 +73,39 @@ In biological networks, spikes do not arrive instantly. `synaptic-mesh` implemen
 
 This enables complex temporal dynamics like polychronization and coincidence detection.
 
-## Anti-Hallucination Layer (AHL) Router
+## Generic Channel Router
 
-The crate includes `AhlRouter`, a specialized application that uses a small SNN for text-domain classification.
+The crate includes `ChannelRouter`, a configurable multi-channel SNN router that integrates signal pulses across neuromodulatory neurons to produce sparse activation masks.
 
 ```rust
-use synapse_router::AhlRouter;
+use synaptic_mesh::{ChannelRouter, RouterConfig};
 
-let mut router = AhlRouter::new();
-let decision = router.route("solve the differential equation dy/dx = sin(x)");
+// Default 3-channel router
+let mut router = ChannelRouter::new();
+let decision = router.route(&[0.8, 0.2, 0.1]);
 
-// decision.active_domains → [Mathematics]
-// decision.firing_rates   → [0.0, 0.87, 0.0]
+// decision.active_channels → [0]
+// decision.firing_rates   → [0.75, 0.12, 0.0]
 ```
 
-## SAAQ Adaptation & Ballast-Lab Integration
+### Configurable Channel Count
 
-- **SAAQ Telemetry** — Adaptation-aware routing that steers traffic away from exhausted neurons.
-- **Ballast-Lab Loop** — Export CSV telemetry for Julia symbolic regression to discover optimal routing policy equations:
-  ```rust
-  let csv = router.telemetry_csv(&telemetry, &firing_rates);
-  // Feed into SR.jl to discover optimal α·spikes - β·adaptation coefficients
-  ```
+```rust
+use synaptic_mesh::{ChannelRouter, RouterConfig};
+
+let config = RouterConfig {
+    channel_count: 8,
+    ..RouterConfig::default()
+};
+let mut router = ChannelRouter::with_config(config);
+let decision = router.route(&[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]);
+// decision.active_channels → [3]
+```
+
+## Adaptation-Aware Routing
+
+- **Neuron State Snapshots** — Per-neuron adaptation and error tracking for dynamic routing decisions.
+- **Routing Policies** — Configurable scoring equations that balance spike activity, adaptation penalties, and error bonuses.
 
 ## Architecture
 
