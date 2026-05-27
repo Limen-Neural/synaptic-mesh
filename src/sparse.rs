@@ -278,6 +278,7 @@ pub struct NeuronStateSnapshot {
     /// Per-neuron spike count from the last routing window.
     pub spike_counts: Vec<u32>,
     /// Estimated error per neuron (e.g. quantization error from external calibration).
+    #[serde(alias = "quant_error")]
     pub error: Vec<f32>,
     /// Global routing step index.
     pub step: u64,
@@ -309,6 +310,22 @@ impl NeuronStateSnapshot {
     pub fn error_bonus(&self, neuron: usize, beta: f32) -> f32 {
         let err = self.error.get(neuron).copied().unwrap_or(0.0);
         beta * (1.0 - err.min(1.0))
+    }
+
+    /// Get a routing bonus for a neuron based on low quantization error.
+    ///
+    /// Deprecated: use [`error_bonus`] instead.
+    #[deprecated(since = "0.2.0", note = "use error_bonus instead")]
+    pub fn quant_bonus(&self, neuron: usize, beta: f32) -> f32 {
+        self.error_bonus(neuron, beta)
+    }
+
+    /// Get the estimated quantization error per neuron.
+    ///
+    /// Deprecated: use the [`error`] field directly.
+    #[deprecated(since = "0.2.0", note = "use error field instead")]
+    pub fn quant_error(&self) -> &[f32] {
+        &self.error
     }
 }
 

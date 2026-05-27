@@ -80,6 +80,7 @@ impl RoutingDecision {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ChannelRouter {
     neurons: Vec<NeuromodNeuron>,
+    #[serde(default)]
     config: RouterConfig,
     /// Cumulative routing decisions since creation.
     pub total_routes: u64,
@@ -103,7 +104,12 @@ impl ChannelRouter {
     }
 
     /// Create a new router with a custom configuration.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `config.routing_timesteps` is zero.
     pub fn with_config(config: RouterConfig) -> Self {
+        assert!(config.routing_timesteps > 0, "routing_timesteps must be > 0");
         let n = config.channel_count;
         let neurons = (0..n).map(|i| {
             let mut neu = NeuromodNeuron::new();
@@ -121,15 +127,16 @@ impl ChannelRouter {
     /// Route raw channel signals through the SNN.
     ///
     /// `signals` must have length equal to `config.channel_count`.
-    pub fn route(&mut self, signals: &[f32]) -> RoutingDecision {
+    pub fn route<S: AsRef<[f32]>>(&mut self, signals: S) -> Result<RoutingDecision, crate::error::MeshError> {
+        let signals = signals.as_ref();
         let n = self.config.channel_count;
-        assert_eq!(
-            signals.len(),
-            n,
-            "signals length ({}) must match channel_count ({})",
-            signals.len(),
-            n
-        );
+        if signals.len() != n {
+            return Err(crate::error::MeshError::NeuronCountMismatch {
+                expected: n,
+                got: signals.len(),
+                context: "route signals".into(),
+            });
+        }
 
         let mut spike_counts = vec![0u32; n];
         let timesteps = self.config.routing_timesteps;
@@ -166,11 +173,11 @@ impl ChannelRouter {
         }
 
         self.total_routes += 1;
-        RoutingDecision {
+        Ok(RoutingDecision {
             active_channels,
             firing_rates,
             input_signals: signals.to_vec(),
-        }
+        })
     }
 
     /// Apply feedback to adjust synaptic weights for a specific channel.
@@ -204,16 +211,7 @@ impl ChannelRouter {
 
     /// Current routing weight matrix (row = neuron, col = input channel).
     pub fn weight_matrix(&self) -> Vec<Vec<f32>> {
-        let n = self.config.channel_count;
-        let mut m = vec![vec![0.0; n]; n];
-        for (i, neu) in self.neurons.iter().enumerate() {
-            for (j, &w) in neu.weights.iter().enumerate() {
-                if j < n {
-                    m[i][j] = w;
-                }
-            }
-        }
-        m
+        self.neurons.iter().map(|neu| neu.weights.clone()).collect()
     }
 
     /// Access the router configuration.
