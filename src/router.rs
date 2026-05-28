@@ -152,8 +152,10 @@ pub struct ChannelRouter {
     /// Cumulative routing decisions since creation.
     pub total_routes: u64,
     /// Per-channel fatigue (0.0 = fresh, 1.0 = fully exhausted).
+    #[serde(default)]
     pub channel_fatigue: Vec<f32>,
     /// Baseline weights for plasticity decay reference.
+    #[serde(default)]
     baseline_weights: Vec<Vec<f32>>,
 }
 
@@ -237,7 +239,13 @@ impl ChannelRouter {
         let timesteps = self.config.routing_timesteps;
         let min_rate = self.config.min_fire_rate;
 
-        // Compute effective thresholds per channel.
+        if self.channel_fatigue.len() != n {
+            self.channel_fatigue.resize(n, 0.0);
+        }
+        if self.baseline_weights.len() != n {
+            self.baseline_weights = self.neurons.iter().map(|neu| neu.weights.clone()).collect();
+        }
+
         let mut effective_thresholds = vec![0.0f32; n];
         let mut effective_leaks = vec![0.0f32; n];
         for i in 0..n {
@@ -308,10 +316,8 @@ impl ChannelRouter {
         let fatigue_acc = self.config.fatigue_accumulation;
         let fatigue_rec = self.config.fatigue_recovery;
 
-        let active_set: std::collections::HashSet<usize> = active_channels.iter().copied().collect();
-
         for i in 0..n {
-            if active_set.contains(&i) {
+            if active_channels.contains(&i) {
                 // Active channel: strengthen (dopamine-gated), accumulate fatigue.
                 let strengthen = potentiate * (1.0 + mods.dopamine);
                 for j in 0..n {
@@ -339,18 +345,29 @@ impl ChannelRouter {
         let n = self.config.channel_count;
         if channel_idx >= n { return; }
 
-        let delta = reward * 0.01; // small learning rate
+        let delta = reward * 0.01;
 
-        // Potentiate/Depress self-affinity
         self.neurons[channel_idx].weights[channel_idx] =
             (self.neurons[channel_idx].weights[channel_idx] + delta).clamp(0.1, 2.0);
 
-        // Lateral inhibition adjustment
         if reward > 0.0 {
             for j in 0..n {
                 if j != channel_idx {
                     self.neurons[j].weights[channel_idx] =
                         (self.neurons[j].weights[channel_idx] - delta * 0.3).clamp(-1.0, 1.5);
+                }
+            }
+        }
+
+        if self.baseline_weights.len() == n {
+            self.baseline_weights[channel_idx][channel_idx] =
+                self.neurons[channel_idx].weights[channel_idx];
+            if reward > 0.0 {
+                for j in 0..n {
+                    if j != channel_idx {
+                        self.baseline_weights[j][channel_idx] =
+                            self.neurons[j].weights[channel_idx];
+                    }
                 }
             }
         }
