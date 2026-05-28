@@ -110,7 +110,7 @@ pub use types::{
 pub use neuromod::NeuromodNeuron;
 
 // Generic router exports
-pub use router::{ChannelRouter, RouterConfig, RoutingDecision};
+pub use router::{ChannelRouter, RouterConfig, RoutingDecision, NeuromodState};
 
 // Backward-compatible router exports (deprecated)
 pub use router::{AhlRouter, AHL_NUM_CHANNELS};

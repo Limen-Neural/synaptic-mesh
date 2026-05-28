@@ -1,9 +1,11 @@
-//! Generic multi-channel SNN router.
+//! Generic multi-channel SNN router with neuromodulatory adaptation.
 //!
 //! A domain-agnostic SNN router that integrates signal pulses across a bank
 //! of neuromodulatory neurons to produce a sparse routing mask.
 //!
-//! The router is generic over channel count and expects raw signal strengths as input.
+//! The router is generic over channel count and supports adaptive
+//! neuromodulatory routing — channels strengthen with use (dopamine-gated)
+//! and weaken when idle (use-it-or-lose-it plasticity).
 
 use serde::{Deserialize, Serialize};
 use crate::neuromod::NeuromodNeuron;
@@ -34,6 +36,14 @@ pub struct RouterConfig {
     pub routing_timesteps: usize,
     /// Minimum firing rate to activate a channel.
     pub min_fire_rate: f32,
+    /// Weight decay rate for inactive channels (use-it-or-lose-it).
+    pub plasticity_decay: f32,
+    /// Weight potentiation rate for active channels (dopamine-gated).
+    pub plasticity_potentiate: f32,
+    /// Fatigue accumulation rate per activation.
+    pub fatigue_accumulation: f32,
+    /// Fatigue recovery rate per tick.
+    pub fatigue_recovery: f32,
 }
 
 impl Default for RouterConfig {
@@ -46,6 +56,57 @@ impl Default for RouterConfig {
             leak: 0.12,
             routing_timesteps: ROUTING_TIMESTEPS,
             min_fire_rate: MIN_FIRE_RATE,
+            plasticity_decay: 0.02,
+            plasticity_potentiate: 0.05,
+            fatigue_accumulation: 0.15,
+            fatigue_recovery: 0.05,
+        }
+    }
+}
+
+/// Neuromodulatory state for adaptive routing.
+///
+/// Cortisol (stress) increases resistance — channels become harder to activate.
+/// Dopamine (reward) increases conductance — channels become easier to activate.
+/// Serotonin (patience) reduces persistence — faster decay of activation.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct NeuromodState {
+    /// Stress level (0.0 = calm, 1.0 = max stress).
+    /// Raises firing thresholds and amplifies fatigue.
+    pub cortisol: f32,
+    /// Reward level (0.0 = no reward, 1.0 = high reward).
+    /// Lowers thresholds, strengthens active synapses, counteracts fatigue.
+    pub dopamine: f32,
+    /// Patience/risk-aversion level (0.0 = impulsive, 1.0 = patient).
+    /// Increases leak/decay rate, making activations less persistent.
+    pub serotonin: f32,
+}
+
+impl NeuromodState {
+    /// Create a balanced neuromodulatory state (no modulation).
+    pub fn balanced() -> Self {
+        Self {
+            cortisol: 0.0,
+            dopamine: 0.0,
+            serotonin: 0.0,
+        }
+    }
+
+    /// Create a stressed state (high cortisol).
+    pub fn stressed() -> Self {
+        Self {
+            cortisol: 0.8,
+            dopamine: 0.0,
+            serotonin: 0.0,
+        }
+    }
+
+    /// Create a rewarded state (high dopamine).
+    pub fn rewarded() -> Self {
+        Self {
+            cortisol: 0.0,
+            dopamine: 0.8,
+            serotonin: 0.0,
         }
     }
 }
@@ -77,6 +138,12 @@ impl RoutingDecision {
 /// Integrates multi-channel signals over `ROUTING_TIMESTEPS` to produce
 /// a sparse activation mask. The number of channels is configurable at
 /// construction time via [`RouterConfig`].
+///
+/// Supports adaptive neuromodulatory routing via [`route_modulated`]:
+/// - Channels strengthen with use (dopamine-gated potentiation)
+/// - Channels weaken when idle (use-it-or-lose-it decay)
+/// - Fatigue accumulates with activation, cortisol amplifies it
+/// - The router naturally seeks the least-resistance pathway
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ChannelRouter {
     neurons: Vec<NeuromodNeuron>,
@@ -84,6 +151,10 @@ pub struct ChannelRouter {
     config: RouterConfig,
     /// Cumulative routing decisions since creation.
     pub total_routes: u64,
+    /// Per-channel fatigue (0.0 = fresh, 1.0 = fully exhausted).
+    pub channel_fatigue: Vec<f32>,
+    /// Baseline weights for plasticity decay reference.
+    baseline_weights: Vec<Vec<f32>>,
 }
 
 /// Backward-compatible alias for the default 3-channel router.
@@ -111,7 +182,7 @@ impl ChannelRouter {
     pub fn with_config(config: RouterConfig) -> Self {
         assert!(config.routing_timesteps > 0, "routing_timesteps must be > 0");
         let n = config.channel_count;
-        let neurons = (0..n).map(|i| {
+        let neurons: Vec<NeuromodNeuron> = (0..n).map(|i| {
             let mut neu = NeuromodNeuron::new();
             // Strong self-affinity; weak cross-channel inhibition.
             neu.weights = vec![config.cross_weight; n];
@@ -121,31 +192,71 @@ impl ChannelRouter {
             neu
         }).collect();
 
-        Self { neurons, config, total_routes: 0 }
+        let baseline_weights = neurons.iter().map(|neu| neu.weights.clone()).collect();
+
+        Self {
+            neurons,
+            config,
+            total_routes: 0,
+            channel_fatigue: vec![0.0; n],
+            baseline_weights,
+        }
     }
 
-    /// Route raw channel signals through the SNN.
+    /// Route raw channel signals through the SNN (non-modulated).
     ///
     /// `signals` must have length equal to `config.channel_count`.
     pub fn route<S: AsRef<[f32]>>(&mut self, signals: S) -> Result<RoutingDecision, crate::error::MeshError> {
+        self.route_modulated(signals, &NeuromodState::balanced())
+    }
+
+    /// Route with neuromodulatory modulation.
+    ///
+    /// Seeks the least-resistance pathway by dynamically adjusting thresholds
+    /// and applying use-it-or-lose-it plasticity:
+    /// - Cortisol raises effective thresholds (resistance)
+    /// - Dopamine lowers thresholds and strengthens active channels (conductance)
+    /// - Serotonin increases leak (reduces persistence)
+    /// - Inactive channels decay toward baseline weights
+    /// - Active channels potentiate (dopamine-gated)
+    pub fn route_modulated<S: AsRef<[f32]>>(
+        &mut self,
+        signals: S,
+        mods: &NeuromodState,
+    ) -> Result<RoutingDecision, crate::error::MeshError> {
         let signals = signals.as_ref();
         let n = self.config.channel_count;
         if signals.len() != n {
             return Err(crate::error::MeshError::NeuronCountMismatch {
                 expected: n,
                 got: signals.len(),
-                context: "route signals".into(),
+                context: "route_modulated signals".into(),
             });
         }
 
-        let mut spike_counts = vec![0u32; n];
         let timesteps = self.config.routing_timesteps;
         let min_rate = self.config.min_fire_rate;
+
+        // Compute effective thresholds per channel.
+        let mut effective_thresholds = vec![0.0f32; n];
+        let mut effective_leaks = vec![0.0f32; n];
+        for i in 0..n {
+            // Cortisol amplifies fatigue → higher threshold.
+            let fatigue_factor = 1.0 + mods.cortisol * self.channel_fatigue[i];
+            // Dopamine reduces threshold → lower resistance.
+            let dopamine_factor = 1.0 - mods.dopamine * 0.5;
+            effective_thresholds[i] = (self.config.threshold * fatigue_factor * dopamine_factor)
+                .clamp(0.05, 2.0);
+            // Serotonin increases leak → faster decay.
+            effective_leaks[i] = (self.config.leak * (1.0 + mods.serotonin)).clamp(0.0, 1.0);
+        }
 
         // Reset membrane potentials for a fresh routing decision.
         for neu in &mut self.neurons {
             neu.v = 0.0;
         }
+
+        let mut spike_counts = vec![0u32; n];
 
         // Integrate over routing_timesteps.
         for _ in 0..timesteps {
@@ -155,7 +266,10 @@ impl ChannelRouter {
                     .map(|(sig, w)| sig * w)
                     .sum();
 
+                // Apply serotonin-modulated leak.
+                neu.leak = effective_leaks[i];
                 neu.integrate(stimulus);
+                neu.threshold = effective_thresholds[i];
 
                 if neu.check_fire().is_some() {
                     spike_counts[i] += 1;
@@ -172,12 +286,52 @@ impl ChannelRouter {
             }
         }
 
+        // Apply use-it-or-lose-it plasticity.
+        self.apply_plasticity(&active_channels, mods);
+
         self.total_routes += 1;
         Ok(RoutingDecision {
             active_channels,
             firing_rates,
             input_signals: signals.to_vec(),
         })
+    }
+
+    /// Apply use-it-or-lose-it plasticity.
+    ///
+    /// - Active channels: strengthen (dopamine-gated), accumulate fatigue
+    /// - Inactive channels: decay toward baseline weights, recover fatigue
+    fn apply_plasticity(&mut self, active_channels: &[usize], mods: &NeuromodState) {
+        let n = self.config.channel_count;
+        let decay = self.config.plasticity_decay;
+        let potentiate = self.config.plasticity_potentiate;
+        let fatigue_acc = self.config.fatigue_accumulation;
+        let fatigue_rec = self.config.fatigue_recovery;
+
+        let active_set: std::collections::HashSet<usize> = active_channels.iter().copied().collect();
+
+        for i in 0..n {
+            if active_set.contains(&i) {
+                // Active channel: strengthen (dopamine-gated), accumulate fatigue.
+                let strengthen = potentiate * (1.0 + mods.dopamine);
+                for j in 0..n {
+                    let baseline = self.baseline_weights[i][j];
+                    let current = self.neurons[i].weights[j];
+                    // Move toward amplified baseline.
+                    let target = baseline * (1.0 + strengthen);
+                    self.neurons[i].weights[j] = current + (target - current) * 0.1;
+                }
+                self.channel_fatigue[i] = (self.channel_fatigue[i] + fatigue_acc).min(1.0);
+            } else {
+                // Inactive channel: decay toward baseline, recover fatigue.
+                for j in 0..n {
+                    let baseline = self.baseline_weights[i][j];
+                    let current = self.neurons[i].weights[j];
+                    self.neurons[i].weights[j] = current + (baseline - current) * decay;
+                }
+                self.channel_fatigue[i] = (self.channel_fatigue[i] - fatigue_rec).max(0.0);
+            }
+        }
     }
 
     /// Apply feedback to adjust synaptic weights for a specific channel.
@@ -217,5 +371,10 @@ impl ChannelRouter {
     /// Access the router configuration.
     pub fn config(&self) -> &RouterConfig {
         &self.config
+    }
+
+    /// Access per-channel fatigue levels.
+    pub fn fatigue(&self) -> &[f32] {
+        &self.channel_fatigue
     }
 }
