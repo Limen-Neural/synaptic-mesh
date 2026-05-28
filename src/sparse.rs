@@ -1,7 +1,7 @@
-//! Compressed Sparse Row (CSR) synaptic map for Blackwell-optimized GPU execution.
+//! Compressed Sparse Row (CSR) synaptic map for GPU-optimized execution.
 //!
 //! Replaces dense $N \times N$ weight matrices with adjacency lists stored in CSR format,
-//! reducing VRAM pressure and enabling warp-optimized shared memory pulls on RTX 5080.
+//! reducing VRAM pressure and enabling warp-optimized shared memory pulls.
 //!
 //! # Layout
 //!
@@ -12,7 +12,7 @@
 //! ```
 //!
 //! For a 2048-neuron network with ~5% connectivity, this reduces storage from
-//! ~16 MB (dense f32) to ~800 KB (sparse), a 20x reduction.
+//! ~16 MB (dense f32) to ~800 KB (sparse), a 20× reduction.
 
 use serde::{Deserialize, Serialize};
 
@@ -27,8 +27,8 @@ pub struct Synapse {
 
 /// Compressed Sparse Row representation of the synaptic weight matrix.
 ///
-/// Generic over `N` (number of neurons) to support both the 3-channel AHL router
-/// and the full 2048-neuron SAAQ routing fabric.
+/// Generic over `N` (number of neurons) to support both small channel routers
+/// and full 2048-neuron routing fabrics.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SparseSynapticMap<const N: usize> {
     /// Row pointers: `row_ptr[i]` gives the start index in `col_indices`/`values`
@@ -56,7 +56,7 @@ impl<const N: usize> SparseSynapticMap<N> {
         }
     }
 
-    /// Build from a dense weight matrix (for migration from the original router).
+    /// Build from a dense weight matrix (for migration from dense representations).
     pub fn from_dense(matrix: &[[f32; N]; N], sparsity_threshold: f32) -> Self {
         let mut row_ptr = Vec::with_capacity(N + 1);
         let mut col_indices = Vec::new();
@@ -267,28 +267,34 @@ impl<const N: usize> Default for SparseSynapticMapBuilder<N> {
     }
 }
 
-/// Routing telemetry snapshot for SAAQ integration.
+/// Per-neuron state snapshot for adaptation-aware routing.
 ///
-/// Captures the state needed for adaptation-aware routing: per-neuron
-/// adaptation levels, spike counts, and quantization error estimates.
+/// Captures the state needed for dynamic routing: per-neuron
+/// adaptation levels, spike counts, and error estimates.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct TelemetrySnapshot {
+pub struct NeuronStateSnapshot {
     /// Per-neuron adaptation state (0.0 = fresh, 1.0 = fully adapted/exhausted).
     pub adaptation: Vec<f32>,
     /// Per-neuron spike count from the last routing window.
     pub spike_counts: Vec<u32>,
-    /// Estimated quantization error per neuron (from SAAQ).
-    pub quant_error: Vec<f32>,
+    /// Estimated error per neuron (e.g. quantization error from external calibration).
+    #[serde(alias = "quant_error")]
+    pub error: Vec<f32>,
     /// Global routing step index.
     pub step: u64,
 }
 
-impl TelemetrySnapshot {
+/// Backward-compatible alias for [`NeuronStateSnapshot`].
+///
+/// Deprecated: use [`NeuronStateSnapshot`] instead.
+pub type TelemetrySnapshot = NeuronStateSnapshot;
+
+impl NeuronStateSnapshot {
     pub fn new(num_neurons: usize) -> Self {
         Self {
             adaptation: vec![0.0; num_neurons],
             spike_counts: vec![0; num_neurons],
-            quant_error: vec![0.0; num_neurons],
+            error: vec![0.0; num_neurons],
             step: 0,
         }
     }
@@ -299,25 +305,41 @@ impl TelemetrySnapshot {
         alpha * self.adaptation.get(neuron).copied().unwrap_or(0.0)
     }
 
-    /// Get a routing bonus for a neuron based on low quantization error.
-    /// Lower quant_error → higher bonus → preferred for routing.
-    pub fn quant_bonus(&self, neuron: usize, beta: f32) -> f32 {
-        let err = self.quant_error.get(neuron).copied().unwrap_or(0.0);
+    /// Get a routing bonus for a neuron based on low error.
+    /// Lower error → higher bonus → preferred for routing.
+    pub fn error_bonus(&self, neuron: usize, beta: f32) -> f32 {
+        let err = self.error.get(neuron).copied().unwrap_or(0.0);
         beta * (1.0 - err.min(1.0))
+    }
+
+    /// Get a routing bonus for a neuron based on low quantization error.
+    ///
+    /// Deprecated: use [`error_bonus`] instead.
+    #[deprecated(since = "0.2.0", note = "use error_bonus instead")]
+    pub fn quant_bonus(&self, neuron: usize, beta: f32) -> f32 {
+        self.error_bonus(neuron, beta)
+    }
+
+    /// Get the estimated quantization error per neuron.
+    ///
+    /// Deprecated: use the [`error`] field directly.
+    #[deprecated(since = "0.2.0", note = "use error field instead")]
+    pub fn quant_error(&self) -> &[f32] {
+        &self.error
     }
 }
 
-/// A routing policy equation discovered by Ballast-Lab (Julia symbolic regression).
+/// A routing policy equation for scoring neurons.
 ///
 /// The policy computes a routing score for each neuron:
-/// `score = α·spikes - β·adaptation - γ·quant_error + δ·base_weight`
+/// `score = α·spikes - β·adaptation - γ·error + δ·base_weight`
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RoutingPolicy {
     /// Weight for spike count contribution.
     pub alpha: f32,
     /// Weight for adaptation penalty.
     pub beta: f32,
-    /// Weight for quantization error penalty.
+    /// Weight for error penalty.
     pub gamma: f32,
     /// Weight for base synaptic strength.
     pub delta: f32,
@@ -342,12 +364,12 @@ impl Default for RoutingPolicy {
 
 impl RoutingPolicy {
     /// Compute the routing score for a single neuron.
-    pub fn score(&self, neuron: usize, telemetry: &TelemetrySnapshot, base_weight: f32) -> f32 {
-        let spikes = telemetry.spike_counts.get(neuron).copied().unwrap_or(0) as f32;
-        let adapt = telemetry.adaptation.get(neuron).copied().unwrap_or(0.0);
-        let qerr = telemetry.quant_error.get(neuron).copied().unwrap_or(0.0);
+    pub fn score(&self, neuron: usize, snapshot: &NeuronStateSnapshot, base_weight: f32) -> f32 {
+        let spikes = snapshot.spike_counts.get(neuron).copied().unwrap_or(0) as f32;
+        let adapt = snapshot.adaptation.get(neuron).copied().unwrap_or(0.0);
+        let err = snapshot.error.get(neuron).copied().unwrap_or(0.0);
 
-        self.alpha * spikes - self.beta * adapt - self.gamma * qerr + self.delta * base_weight
+        self.alpha * spikes - self.beta * adapt - self.gamma * err + self.delta * base_weight
     }
 
     /// Check if a neuron should be activated based on its score.
