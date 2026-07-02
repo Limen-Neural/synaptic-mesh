@@ -374,3 +374,54 @@ fn least_resistance_pathway_routing() {
     assert!(rate_fatigued < rate_baseline,
         "Fatigued channel 0 should have lower firing rate: {rate_baseline} -> {rate_fatigued}");
 }
+
+#[test]
+fn cortisol_increases_resistance_on_fresh_router() {
+    // Regression test: on a brand-new router (all fatigue = 0), high cortisol
+    // must still raise the effective threshold and reduce firing. Prior to the
+    // fix, `fatigue_factor = 1 + cortisol * fatigue == 1.0` collapsed to the
+    // balanced baseline and cortisol had no effect at all.
+    //
+    // Signal 0.05 picked so the equilibrium membrane potential under the
+    // balanced threshold (0.22) drives sustained firing, but with the
+    // stressed threshold (0.22 * 1.5 = 0.33) it stays sub-threshold for the
+    // full 16-timestep integration window. This gives a clear, reproducible
+    // gap between balanced and stressed rates on a fresh router.
+    let mut router = ChannelRouter::new();
+    assert!(router.channel_fatigue.iter().all(|&f| f == 0.0),
+        "Pre-condition: fresh router has zero fatigue on every channel");
+
+    let d_calm = router.route_modulated(&[0.05, 0.0, 0.0], &NeuromodState::balanced()).unwrap();
+    let rate_calm = d_calm.firing_rates[0];
+
+    let stressed = NeuromodState { cortisol: 1.0, ..NeuromodState::default() };
+    let d_stressed = router.route_modulated(&[0.05, 0.0, 0.0], &stressed).unwrap();
+    let rate_stressed = d_stressed.firing_rates[0];
+
+    assert!(rate_stressed < rate_calm,
+        "Cortisol must raise the threshold on a fresh router: \
+         calm={rate_calm}, stressed={rate_stressed}");
+}
+
+#[test]
+fn router_config_backward_compatible_serde() {
+    // Regression test: a config serialized before the plasticity/fatigue
+    // fields were added must still deserialize. Prior to the fix, the
+    // missing fields caused `serde_json` / `bincode` to error.
+    let old_json = r#"{
+        "channel_count": 3,
+        "self_weight": 0.9,
+        "cross_weight": -0.15,
+        "threshold": 0.22,
+        "leak": 0.12,
+        "routing_timesteps": 16,
+        "min_fire_rate": 0.1875
+    }"#;
+    let cfg: RouterConfig = serde_json::from_str(old_json)
+        .expect("Old RouterConfig JSON must deserialize with new defaults");
+    assert_eq!(cfg.channel_count, 3);
+    assert!((cfg.plasticity_decay - 0.02).abs() < 1e-6);
+    assert!((cfg.plasticity_potentiate - 0.05).abs() < 1e-6);
+    assert!((cfg.fatigue_accumulation - 0.15).abs() < 1e-6);
+    assert!((cfg.fatigue_recovery - 0.05).abs() < 1e-6);
+}
