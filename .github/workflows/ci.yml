@@ -21,7 +21,10 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        # Not pinned to SHA: dtolnay/rust-toolchain uses rolling tags (stable, 1.96, etc.)
+        # rather than versioned releases. The `stable` ref always points to the latest
+        # action revision that supports the current stable Rust toolchain.
+        uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
 
