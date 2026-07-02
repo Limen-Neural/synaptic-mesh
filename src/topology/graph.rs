@@ -62,21 +62,7 @@ impl SynapticGraph {
         neuron_count: usize,
         descriptors: &[SynapseDescriptor],
     ) -> Result<Self> {
-        // Validate indices
-        for desc in descriptors {
-            if desc.source as usize >= neuron_count {
-                return Err(MeshError::IndexOutOfBounds {
-                    index: desc.source as usize,
-                    max: neuron_count - 1,
-                });
-            }
-            if desc.target as usize >= neuron_count {
-                return Err(MeshError::IndexOutOfBounds {
-                    index: desc.target as usize,
-                    max: neuron_count - 1,
-                });
-            }
-        }
+        Self::validate_descriptor_indices(neuron_count, descriptors)?;
 
         // Count edges per source neuron
         let mut counts = vec![0usize; neuron_count];
@@ -99,7 +85,6 @@ impl SynapticGraph {
 
         // Place each descriptor at the right position
         let mut cursor = counts.clone();
-        // cursor[i] = how many edges for neuron i have been placed so far
         cursor.fill(0);
 
         for desc in descriptors {
@@ -120,6 +105,28 @@ impl SynapticGraph {
             delays,
             polarities,
         })
+    }
+
+    /// Validate that all descriptor source/target indices are within bounds.
+    fn validate_descriptor_indices(
+        neuron_count: usize,
+        descriptors: &[SynapseDescriptor],
+    ) -> Result<()> {
+        for desc in descriptors {
+            if desc.source as usize >= neuron_count {
+                return Err(MeshError::IndexOutOfBounds {
+                    index: desc.source as usize,
+                    max: neuron_count - 1,
+                });
+            }
+            if desc.target as usize >= neuron_count {
+                return Err(MeshError::IndexOutOfBounds {
+                    index: desc.target as usize,
+                    max: neuron_count - 1,
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Number of neurons in the graph.

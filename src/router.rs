@@ -491,7 +491,7 @@ impl ChannelRouter {
     /// use-it-or-lose-it decay. Skipped if `baseline_weights` hasn't been
     /// initialized yet (e.g. before the first `route_modulated` call).
     fn sync_baseline_after_feedback(&mut self, channel_idx: usize, reward: f32) {
-        let n = self.config.channel_count;
+        let n = self.neurons.len();
         if self.baseline_weights.len() != n {
             return;
         }
