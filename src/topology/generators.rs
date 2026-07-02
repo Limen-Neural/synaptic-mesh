@@ -65,11 +65,6 @@ pub fn generate_random(
             "connection probability p={p} must be in [0, 1]"
         )));
     }
-    if !(0.0..=1.0).contains(&inhibitory_fraction) {
-        return Err(MeshError::InvalidConfig(format!(
-            "inhibitory fraction={inhibitory_fraction} must be in [0, 1]"
-        )));
-    }
     if n == 0 {
         return Err(MeshError::InvalidConfig("neuron count must be ≥ 1".into()));
     }
@@ -133,11 +128,6 @@ pub fn generate_small_world(
     if !(0.0..=1.0).contains(&beta) {
         return Err(MeshError::InvalidConfig(format!(
             "beta={beta} must be in [0, 1]"
-        )));
-    }
-    if !(0.0..=1.0).contains(&inhibitory_fraction) {
-        return Err(MeshError::InvalidConfig(format!(
-            "inhibitory fraction={inhibitory_fraction} must be in [0, 1]"
         )));
     }
 
@@ -208,11 +198,6 @@ pub fn generate_scale_free(
     if m == 0 || m > m0 {
         return Err(MeshError::InvalidConfig(format!(
             "m={m} must be in [1, m0]"
-        )));
-    }
-    if !(0.0..=1.0).contains(&inhibitory_fraction) {
-        return Err(MeshError::InvalidConfig(format!(
-            "inhibitory fraction={inhibitory_fraction} must be in [0, 1]"
         )));
     }
 
@@ -304,9 +289,9 @@ pub fn generate_layered(
     max_delay: u16,
     inhibitory_fraction: f32,
 ) -> Result<SynapticGraph> {
-    if layer_sizes.is_empty() || layer_sizes.contains(&0) {
+    if layer_sizes.is_empty() {
         return Err(MeshError::InvalidConfig(
-            "all layer sizes must be greater than 0".into(),
+            "at least one layer required".into(),
         ));
     }
     if !(0.0..=1.0).contains(&inter_layer_p) {
@@ -314,13 +299,13 @@ pub fn generate_layered(
             "inter_layer_p={inter_layer_p} must be in [0, 1]"
         )));
     }
-    if !(0.0..=1.0).contains(&inhibitory_fraction) {
-        return Err(MeshError::InvalidConfig(format!(
-            "inhibitory fraction={inhibitory_fraction} must be in [0, 1]"
-        )));
-    }
 
     let n: usize = layer_sizes.iter().sum();
+    if n == 0 {
+        return Err(MeshError::InvalidConfig(
+            "total neuron count must be ≥ 1".into(),
+        ));
+    }
 
     let inhibitory_cutoff = (n as f32 * inhibitory_fraction) as usize;
     let mut descriptors = Vec::new();

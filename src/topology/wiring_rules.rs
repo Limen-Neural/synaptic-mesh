@@ -6,7 +6,6 @@
 //! biological constraints like Dale's law or to assign realistic
 //! axonal propagation delays.
 
-use crate::error::MeshError;
 use crate::topology::graph::SynapticGraph;
 use crate::types::{DelayTicks, Polarity, SynapseDescriptor};
 
@@ -19,18 +18,10 @@ use crate::types::{DelayTicks, Polarity, SynapseDescriptor};
 /// # References
 ///
 /// Dale, H. H. (1935). *Pharmacology and Nerve-endings.*
-pub fn apply_dale_polarity(
-    graph: &SynapticGraph,
-    inhibitory_fraction: f32,
-) -> Result<Vec<Polarity>, MeshError> {
-    if !(0.0..=1.0).contains(&inhibitory_fraction) {
-        return Err(MeshError::InvalidConfig(format!(
-            "inhibitory fraction={inhibitory_fraction} must be in [0, 1]"
-        )));
-    }
+pub fn apply_dale_polarity(graph: &SynapticGraph, inhibitory_fraction: f32) -> Vec<Polarity> {
     let n = graph.neuron_count();
-    let inh_count = (n as f32 * inhibitory_fraction) as usize;
-    Ok((0..n)
+    let inh_count = (n as f32 * inhibitory_fraction.clamp(0.0, 1.0)) as usize;
+    (0..n)
         .map(|i| {
             if i < inh_count {
                 Polarity::Inhibitory
@@ -38,7 +29,7 @@ pub fn apply_dale_polarity(
                 Polarity::Excitatory
             }
         })
-        .collect())
+        .collect()
 }
 
 /// Assign axonal propagation delays based on distance between neurons.
@@ -62,14 +53,6 @@ pub fn assign_delays(
     speed: f32,
     max_delay: DelayTicks,
 ) {
-    // max_delay == 0 means all synapses deliver same-tick (delay = 0).
-    if max_delay == 0 {
-        for desc in descriptors.iter_mut() {
-            desc.delay = 0;
-        }
-        return;
-    }
-
     for desc in descriptors.iter_mut() {
         if let Some(pos) = positions {
             let src_pos = &pos[desc.source as usize];
@@ -97,7 +80,7 @@ mod tests {
     #[test]
     fn dale_polarity_splits_correctly() {
         let graph = generate_random(100, 0.1, 5, 0.2).unwrap();
-        let polarities = apply_dale_polarity(&graph, 0.2).unwrap();
+        let polarities = apply_dale_polarity(&graph, 0.2);
         assert_eq!(polarities.len(), 100);
         assert_eq!(
             polarities
