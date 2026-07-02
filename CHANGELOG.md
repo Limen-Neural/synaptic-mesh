@@ -35,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0] - 2026-05-28
 
-### Added
+### Features Added
 
 - Neuromodulatory adaptation in `ChannelRouter` — `NeuromodState` (cortisol,
   dopamine, serotonin), `route_modulated()`, `apply_plasticity()`, per-channel
