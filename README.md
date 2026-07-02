@@ -8,7 +8,7 @@
 <p align="center">
  <img src="https://img.shields.io/crates/v/synaptic-mesh" alt="crates.io"></a>
   <a href="https://docs.rs/synaptic-mesh"><img src="https://docs.rs/synaptic-mesh/badge.svg" alt="docs.rs"></a>
-  <img src="https://img.shields.io/badge/license-GPL--3.0-orange" alt="GPL-3.0">
+  <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="MIT OR Apache-2.0">
 </p>
 
 ---
@@ -143,4 +143,11 @@ let decision = router.route(&[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]);
 
 ## License
 
-GPL-3.0-or-later
+Dual-licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE-2.0](LICENSE-APACHE-2.0) or <http://www.apache.org/licenses/LICENSE-2.0>)
+- MIT License ([LICENSE-MIT](LICENSE-MIT) or <http://opensource.org/licenses/MIT>)
+
+at your option. Contributions intentionally submitted for inclusion in this
+crate by you, as defined in the Apache-2.0 license, shall be dual-licensed as
+above, without any additional terms or conditions.

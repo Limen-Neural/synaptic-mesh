@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Topology module — network graph construction and wiring.
 //!
 //! Provides the [`SynapticGraph`] adjacency structure and deterministic

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Compressed Sparse Row (CSR) synaptic map for GPU-optimized execution.
 //!
 //! Replaces dense $N \times N$ weight matrices with adjacency lists stored in CSR format,

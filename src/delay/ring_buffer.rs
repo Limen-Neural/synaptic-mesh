@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Ring-buffer delay queue for tick-aligned spike delivery.
 //!
 //! The [`SpikeDelayBuffer`] implements a fixed-size circular buffer where
@@ -66,8 +68,16 @@ impl SpikeDelayBuffer {
     /// Panics if `delay > max_delay` or `target >= neuron_count`.
     #[inline]
     pub fn inject(&mut self, target: usize, weight: f32, delay: usize) {
-        debug_assert!(delay <= self.max_delay, "delay {delay} > max_delay {}", self.max_delay);
-        debug_assert!(target < self.neuron_count, "target {target} >= neuron_count {}", self.neuron_count);
+        debug_assert!(
+            delay <= self.max_delay,
+            "delay {delay} > max_delay {}",
+            self.max_delay
+        );
+        debug_assert!(
+            target < self.neuron_count,
+            "target {target} >= neuron_count {}",
+            self.neuron_count
+        );
 
         let slot_idx = (self.current_tick as usize + delay) % self.slots.len();
         self.slots[slot_idx][target] += weight;

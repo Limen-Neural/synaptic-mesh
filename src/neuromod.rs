@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Neuromodulatory Integrative Fixed-threshold (NIF) neuron model.
 //!
 //! Provides a neuron model where the effective synaptic input is modulated

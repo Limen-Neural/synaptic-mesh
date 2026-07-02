@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Wiring rules for synaptic graph construction.
 //!
 //! These functions operate on an existing [`SynapticGraph`] to enforce
@@ -16,10 +18,7 @@ use crate::types::{DelayTicks, Polarity, SynapseDescriptor};
 /// # References
 ///
 /// Dale, H. H. (1935). *Pharmacology and Nerve-endings.*
-pub fn apply_dale_polarity(
-    graph: &SynapticGraph,
-    inhibitory_fraction: f32,
-) -> Vec<Polarity> {
+pub fn apply_dale_polarity(graph: &SynapticGraph, inhibitory_fraction: f32) -> Vec<Polarity> {
     let n = graph.neuron_count();
     let inh_count = (n as f32 * inhibitory_fraction.clamp(0.0, 1.0)) as usize;
     (0..n)
@@ -66,7 +65,8 @@ pub fn assign_delays(
             desc.delay = delay.clamp(1, max_delay);
         } else {
             // Deterministic delay from indices
-            let mixed = (desc.source as usize * 71 + desc.target as usize * 37 + 13) % (max_delay as usize + 1);
+            let mixed = (desc.source as usize * 71 + desc.target as usize * 37 + 13)
+                % (max_delay as usize + 1);
             desc.delay = (mixed as u16).max(1);
         }
     }
@@ -83,11 +83,17 @@ mod tests {
         let polarities = apply_dale_polarity(&graph, 0.2);
         assert_eq!(polarities.len(), 100);
         assert_eq!(
-            polarities.iter().filter(|&&p| p == Polarity::Inhibitory).count(),
+            polarities
+                .iter()
+                .filter(|&&p| p == Polarity::Inhibitory)
+                .count(),
             20
         );
         assert_eq!(
-            polarities.iter().filter(|&&p| p == Polarity::Excitatory).count(),
+            polarities
+                .iter()
+                .filter(|&&p| p == Polarity::Excitatory)
+                .count(),
             80
         );
     }

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Delay module — temporal delay infrastructure for spike propagation.
 //!
 //! Provides ring-buffer-based delay queues that deliver spikes at the

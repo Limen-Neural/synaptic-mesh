@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Core types for `synaptic-mesh`.
 //!
 //! Shared scalar types, measurement units, and configuration structs used
@@ -23,9 +25,10 @@ pub type DelayTicks = u16;
 ///
 /// Dale, H. H. (1935). *Pharmacology and Nerve-endings.* Proceedings of
 /// the Royal Society of Medicine, 28(3), 319–332.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum Polarity {
     /// Positive synaptic weight → depolarises the postsynaptic neuron.
+    #[default]
     Excitatory,
     /// Negative synaptic weight → hyperpolarises the postsynaptic neuron.
     Inhibitory,
@@ -38,12 +41,6 @@ impl Polarity {
             Self::Excitatory => 1.0,
             Self::Inhibitory => -1.0,
         }
-    }
-}
-
-impl Default for Polarity {
-    fn default() -> Self {
-        Self::Excitatory
     }
 }
 

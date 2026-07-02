@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! [`SynapticMesh`] — top-level orchestrator owning topology + delays.
 //!
 //! The `SynapticMesh` is the primary public-facing struct of this crate.
@@ -8,8 +10,8 @@
 //! # Usage
 //!
 //! ```rust
-//! use synapse_router::mesh::SynapticMesh;
-//! use synapse_router::topology::generators::generate_random;
+//! use synaptic_mesh::mesh::SynapticMesh;
+//! use synaptic_mesh::topology::generate_random;
 //!
 //! let graph = generate_random(64, 0.1, 5, 0.2).unwrap();
 //! let mut mesh = SynapticMesh::new(graph);
@@ -94,7 +96,8 @@ impl SynapticMesh {
                 continue;
             }
             for (target, weight, delay, _polarity) in self.graph.outgoing(src) {
-                self.delay_buffer.inject(target as usize, weight, delay as usize);
+                self.delay_buffer
+                    .inject(target as usize, weight, delay as usize);
             }
         }
 
@@ -130,11 +133,8 @@ impl SynapticMesh {
                 continue;
             }
             for (target, weight, delay, _polarity) in self.graph.outgoing(src) {
-                self.delay_buffer.inject(
-                    target as usize,
-                    weight * activation,
-                    delay as usize,
-                );
+                self.delay_buffer
+                    .inject(target as usize, weight * activation, delay as usize);
             }
         }
 
@@ -287,8 +287,8 @@ mod tests {
         let graph = generate_random(8, 0.3, 2, 0.2).unwrap();
         let mut mesh = SynapticMesh::new(graph);
         assert_eq!(mesh.tick(), 0);
-        mesh.propagate(&vec![false; 8]).unwrap();
-        mesh.propagate(&vec![false; 8]).unwrap();
+        mesh.propagate(&[false; 8]).unwrap();
+        mesh.propagate(&[false; 8]).unwrap();
         assert_eq!(mesh.tick(), 2);
     }
 
@@ -296,8 +296,8 @@ mod tests {
     fn reset_clears_state() {
         let graph = generate_random(8, 0.3, 2, 0.2).unwrap();
         let mut mesh = SynapticMesh::new(graph);
-        mesh.propagate(&vec![true; 8]).unwrap();
-        mesh.propagate(&vec![true; 8]).unwrap();
+        mesh.propagate(&[true; 8]).unwrap();
+        mesh.propagate(&[true; 8]).unwrap();
         mesh.reset();
         assert_eq!(mesh.tick(), 0);
     }
@@ -324,20 +324,33 @@ mod tests {
 
     #[test]
     fn layered_mesh_feed_forward() {
+        // generate_layered(&[4, 8, 2], weight, max_delay, inh_fraction)
+        // Neuron layout: [0..4) input, [4..12) hidden, [12..14) output
         let graph = generate_layered(&[4, 8, 2], 1.0, 3, 0.2).unwrap();
         let mut mesh = SynapticMesh::new(graph);
         assert_eq!(mesh.neuron_count(), 14);
 
-        // Fire input layer
+        // `propagate()` is a one-hop operation: it injects outgoing synapses
+        // from *currently firing* neurons into the delay buffer and drains
+        // currents that have arrived this tick. It does NOT threshold-and-fire
+        // internally. To observe multi-hop feed-forward propagation, the test
+        // harness must feed received currents back as spikes.
         let mut spikes = vec![false; 14];
-        for i in 0..4 {
-            spikes[i] = true;
+        for spike in spikes.iter_mut().take(4) {
+            *spike = true; // fire input layer
         }
-        // Run enough ticks for delays to propagate
+
+        // Run enough ticks for delays to propagate through both hops
+        // (max_delay=3 per hop → need at least 6 ticks; run 12 for margin).
         let mut last_layer_activated = false;
-        for _ in 0..10 {
+        for _ in 0..12 {
             let currents = mesh.propagate(&spikes).unwrap();
-            spikes = vec![false; 14];
+
+            // Threshold-and-fire: neurons that received enough current fire
+            // next tick. This mirrors how a downstream consumer would use
+            // `propagate()` to build a multi-layer simulation loop.
+            spikes = currents.iter().map(|&c| c > 0.5).collect();
+
             // Check if last-layer neurons (12, 13) received current
             if currents[12].abs() > 1e-6 || currents[13].abs() > 1e-6 {
                 last_layer_activated = true;

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Deterministic topology generators.
 //!
 //! All generators use index-based pseudo-random hashing (no external RNG)
@@ -38,7 +40,10 @@ fn hash_delay(src: usize, tgt: usize, max_delay: u16) -> u16 {
         return 0;
     }
     let h = hash_pair(src * 71 + 3, tgt * 37 + 11);
-    (h * max_delay as f32).round().min(max_delay as f32).max(1.0) as u16
+    (h * max_delay as f32)
+        .round()
+        .min(max_delay as f32)
+        .max(1.0) as u16
 }
 
 // ── Generators ────────────────────────────────────────────────────────────────
@@ -55,7 +60,7 @@ pub fn generate_random(
     max_delay: u16,
     inhibitory_fraction: f32,
 ) -> Result<SynapticGraph> {
-    if p < 0.0 || p > 1.0 {
+    if !(0.0..=1.0).contains(&p) {
         return Err(MeshError::InvalidConfig(format!(
             "connection probability p={p} must be in [0, 1]"
         )));
@@ -120,7 +125,7 @@ pub fn generate_small_world(
             "k={k} must be in [1, n-1)"
         )));
     }
-    if beta < 0.0 || beta > 1.0 {
+    if !(0.0..=1.0).contains(&beta) {
         return Err(MeshError::InvalidConfig(format!(
             "beta={beta} must be in [0, 1]"
         )));
@@ -143,8 +148,8 @@ pub fn generate_small_world(
             // Rewire with probability beta
             if hash_pair(src * 131 + offset, tgt * 79) < beta {
                 // Pick a deterministic "random" target
-                let new_tgt = (hash_pair(src * 173 + offset * 41, n * 29)
-                    * (n - 1) as f32) as usize;
+                let new_tgt =
+                    (hash_pair(src * 173 + offset * 41, n * 29) * (n - 1) as f32) as usize;
                 let new_tgt = if new_tgt >= src {
                     (new_tgt + 1) % n
                 } else {
@@ -201,7 +206,7 @@ pub fn generate_scale_free(
     let mut degree = vec![0usize; n];
 
     // Seed: fully connect the first m0 nodes
-    for i in 0..m0 {
+    for (i, deg) in degree.iter_mut().enumerate().take(m0) {
         let polarity = if i < inhibitory_cutoff {
             Polarity::Inhibitory
         } else {
@@ -216,7 +221,7 @@ pub fn generate_scale_free(
                     delay: hash_delay(i, j, max_delay),
                     polarity,
                 });
-                degree[i] += 1;
+                *deg += 1;
             }
         }
     }
@@ -285,9 +290,11 @@ pub fn generate_layered(
     inhibitory_fraction: f32,
 ) -> Result<SynapticGraph> {
     if layer_sizes.is_empty() {
-        return Err(MeshError::InvalidConfig("at least one layer required".into()));
+        return Err(MeshError::InvalidConfig(
+            "at least one layer required".into(),
+        ));
     }
-    if inter_layer_p < 0.0 || inter_layer_p > 1.0 {
+    if !(0.0..=1.0).contains(&inter_layer_p) {
         return Err(MeshError::InvalidConfig(format!(
             "inter_layer_p={inter_layer_p} must be in [0, 1]"
         )));
@@ -295,7 +302,9 @@ pub fn generate_layered(
 
     let n: usize = layer_sizes.iter().sum();
     if n == 0 {
-        return Err(MeshError::InvalidConfig("total neuron count must be ≥ 1".into()));
+        return Err(MeshError::InvalidConfig(
+            "total neuron count must be ≥ 1".into(),
+        ));
     }
 
     let inhibitory_cutoff = (n as f32 * inhibitory_fraction) as usize;
@@ -416,7 +425,10 @@ mod tests {
         for src in 0..6 {
             for (_, weight, _, polarity) in g.outgoing(src) {
                 assert_eq!(polarity, Polarity::Inhibitory);
-                assert!(weight <= 0.0, "inhibitory neuron {src} has positive weight {weight}");
+                assert!(
+                    weight <= 0.0,
+                    "inhibitory neuron {src} has positive weight {weight}"
+                );
             }
         }
     }

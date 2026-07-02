@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Generic multi-channel SNN router with neuromodulatory adaptation.
 //!
 //! A domain-agnostic SNN router that integrates signal pulses across a bank
@@ -7,8 +9,8 @@
 //! neuromodulatory routing — channels strengthen with use (dopamine-gated)
 //! and weaken when idle (use-it-or-lose-it plasticity).
 
-use serde::{Deserialize, Serialize};
 use crate::neuromod::NeuromodNeuron;
+use serde::{Deserialize, Serialize};
 
 /// Number of input channels for the default 3-channel router (backward compatible).
 pub const AHL_NUM_CHANNELS: usize = 3;
@@ -55,11 +57,21 @@ pub struct RouterConfig {
     pub fatigue_recovery: f32,
 }
 
-fn default_plasticity_decay() -> f32 { 0.02 }
-fn default_plasticity_potentiate() -> f32 { 0.05 }
-fn default_plasticity_speed() -> f32 { 0.1 }
-fn default_fatigue_accumulation() -> f32 { 0.15 }
-fn default_fatigue_recovery() -> f32 { 0.05 }
+fn default_plasticity_decay() -> f32 {
+    0.02
+}
+fn default_plasticity_potentiate() -> f32 {
+    0.05
+}
+fn default_plasticity_speed() -> f32 {
+    0.1
+}
+fn default_fatigue_accumulation() -> f32 {
+    0.15
+}
+fn default_fatigue_recovery() -> f32 {
+    0.05
+}
 
 impl Default for RouterConfig {
     fn default() -> Self {
@@ -199,17 +211,22 @@ impl ChannelRouter {
     ///
     /// Panics if `config.routing_timesteps` is zero.
     pub fn with_config(config: RouterConfig) -> Self {
-        assert!(config.routing_timesteps > 0, "routing_timesteps must be > 0");
+        assert!(
+            config.routing_timesteps > 0,
+            "routing_timesteps must be > 0"
+        );
         let n = config.channel_count;
-        let neurons: Vec<NeuromodNeuron> = (0..n).map(|i| {
-            let mut neu = NeuromodNeuron::new();
-            // Strong self-affinity; weak cross-channel inhibition.
-            neu.weights = vec![config.cross_weight; n];
-            neu.weights[i] = config.self_weight;
-            neu.threshold = config.threshold;
-            neu.leak = config.leak;
-            neu
-        }).collect();
+        let neurons: Vec<NeuromodNeuron> = (0..n)
+            .map(|i| {
+                let mut neu = NeuromodNeuron::new();
+                // Strong self-affinity; weak cross-channel inhibition.
+                neu.weights = vec![config.cross_weight; n];
+                neu.weights[i] = config.self_weight;
+                neu.threshold = config.threshold;
+                neu.leak = config.leak;
+                neu
+            })
+            .collect();
 
         let baseline_weights = neurons.iter().map(|neu| neu.weights.clone()).collect();
 
@@ -231,7 +248,10 @@ impl ChannelRouter {
     /// matching the original pre-neuromodulation API — callers using this
     /// public method see the same error message they did before, even though
     /// the implementation now delegates to `route_modulated` internally.
-    pub fn route<S: AsRef<[f32]>>(&mut self, signals: S) -> Result<RoutingDecision, crate::error::MeshError> {
+    pub fn route<S: AsRef<[f32]>>(
+        &mut self,
+        signals: S,
+    ) -> Result<RoutingDecision, crate::error::MeshError> {
         self.route_modulated_with_context(signals, &NeuromodState::balanced(), "route signals")
     }
 
@@ -324,7 +344,8 @@ impl ChannelRouter {
         let mut spike_counts = vec![0u32; n];
         for _ in 0..timesteps {
             for (i, neu) in self.neurons.iter_mut().enumerate() {
-                let stimulus: f32 = signals.iter()
+                let stimulus: f32 = signals
+                    .iter()
                     .zip(neu.weights.iter())
                     .map(|(sig, w)| sig * w)
                     .sum();
@@ -378,8 +399,8 @@ impl ChannelRouter {
             let fatigue_amplification = 1.0 + mods.cortisol * self.channel_fatigue[i];
             let fatigue_factor = baseline_stress * fatigue_amplification;
             let dopamine_factor = 1.0 - mods.dopamine * 0.5;
-            thresholds[i] = (self.config.threshold * fatigue_factor * dopamine_factor)
-                .clamp(0.05, 2.0);
+            thresholds[i] =
+                (self.config.threshold * fatigue_factor * dopamine_factor).clamp(0.05, 2.0);
             leaks[i] = (self.config.leak * (1.0 + mods.serotonin)).clamp(0.0, 1.0);
         }
         (thresholds, leaks)
@@ -438,7 +459,9 @@ impl ChannelRouter {
     pub fn apply_feedback(&mut self, channel_idx: usize, reward: f32) {
         self.ensure_neuromod_state_synced();
         let n = self.config.channel_count;
-        if channel_idx >= n { return; }
+        if channel_idx >= n {
+            return;
+        }
 
         let delta = reward * 0.01;
 
@@ -472,8 +495,7 @@ impl ChannelRouter {
         if reward > 0.0 {
             for j in 0..n {
                 if j != channel_idx {
-                    self.baseline_weights[j][channel_idx] =
-                        self.neurons[j].weights[channel_idx];
+                    self.baseline_weights[j][channel_idx] = self.neurons[j].weights[channel_idx];
                 }
             }
         }
