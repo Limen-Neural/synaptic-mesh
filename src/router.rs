@@ -344,6 +344,11 @@ impl ChannelRouter {
         let mut spike_counts = vec![0u32; n];
         for _ in 0..timesteps {
             for (i, neu) in self.neurons.iter_mut().enumerate() {
+                debug_assert_eq!(
+                    neu.weights.len(),
+                    signals.len(),
+                    "Neuron weights length mismatch"
+                );
                 let stimulus: f32 = signals
                     .iter()
                     .zip(neu.weights.iter())
@@ -458,7 +463,7 @@ impl ChannelRouter {
     /// `ensure_neuromod_state_synced` for the exact shape check.
     pub fn apply_feedback(&mut self, channel_idx: usize, reward: f32) {
         self.ensure_neuromod_state_synced();
-        let n = self.config.channel_count;
+        let n = self.neurons.len();
         if channel_idx >= n {
             return;
         }
