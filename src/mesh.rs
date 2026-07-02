@@ -324,7 +324,7 @@ mod tests {
 
     #[test]
     fn layered_mesh_feed_forward() {
-        // generate_layered(&[4, 8, 2], weight, max_delay, inh_fraction)
+        // generate_layered(&[4, 8, 2], inter_layer_p, max_delay, inh_fraction)
         // Neuron layout: [0..4) input, [4..12) hidden, [12..14) output
         let graph = generate_layered(&[4, 8, 2], 1.0, 3, 0.2).unwrap();
         let mut mesh = SynapticMesh::new(graph);

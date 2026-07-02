@@ -289,14 +289,19 @@ pub fn generate_layered(
     max_delay: u16,
     inhibitory_fraction: f32,
 ) -> Result<SynapticGraph> {
-    if layer_sizes.is_empty() {
+    if layer_sizes.is_empty() || layer_sizes.contains(&0) {
         return Err(MeshError::InvalidConfig(
-            "at least one layer required".into(),
+            "all layer sizes must be greater than 0".into(),
         ));
     }
     if !(0.0..=1.0).contains(&inter_layer_p) {
         return Err(MeshError::InvalidConfig(format!(
             "inter_layer_p={inter_layer_p} must be in [0, 1]"
+        )));
+    }
+    if !(0.0..=1.0).contains(&inhibitory_fraction) {
+        return Err(MeshError::InvalidConfig(format!(
+            "inhibitory fraction={inhibitory_fraction} must be in [0, 1]"
         )));
     }
 
