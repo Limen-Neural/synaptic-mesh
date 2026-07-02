@@ -271,9 +271,6 @@ impl ChannelRouter {
             });
         }
 
-        let timesteps = self.config.routing_timesteps;
-        let min_rate = self.config.min_fire_rate;
-
         // Self-heal: keep neuromod state vectors aligned with the current
         // channel count (e.g. after deserializing an older router).
         self.ensure_neuromod_state_synced();
@@ -284,26 +281,10 @@ impl ChannelRouter {
             neu.v = 0.0;
         }
 
-        let mut spike_counts = vec![0u32; n];
-
-        // Integrate over routing_timesteps.
-        for _ in 0..timesteps {
-            for (i, neu) in self.neurons.iter_mut().enumerate() {
-                let stimulus: f32 = signals.iter()
-                    .zip(neu.weights.iter())
-                    .map(|(sig, w)| sig * w)
-                    .sum();
-
-                // Apply serotonin-modulated leak.
-                neu.leak = effective_leaks[i];
-                neu.integrate(stimulus);
-                neu.threshold = effective_thresholds[i];
-
-                if neu.check_fire().is_some() {
-                    spike_counts[i] += 1;
-                }
-            }
-        }
+        let timesteps = self.config.routing_timesteps;
+        let min_rate = self.config.min_fire_rate;
+        let spike_counts =
+            self.integrate_signals(signals, &effective_thresholds, &effective_leaks, timesteps);
 
         let mut firing_rates = vec![0.0f32; n];
         let mut active_channels = Vec::new();
@@ -323,6 +304,40 @@ impl ChannelRouter {
             firing_rates,
             input_signals: signals.to_vec(),
         })
+    }
+
+    /// Run the per-timestep integration loop and return spike counts per channel.
+    ///
+    /// For each timestep, every neuron computes its stimulus from the signal
+    /// vector, applies the serotonin-modulated leak, integrates the stimulus,
+    /// and checks against the dopamine/cortisol-modulated threshold. Neuron
+    /// membrane potentials (`v`) are updated in place; per-channel spike counts
+    /// are incremented on each fire.
+    fn integrate_signals(
+        &mut self,
+        signals: &[f32],
+        effective_thresholds: &[f32],
+        effective_leaks: &[f32],
+        timesteps: usize,
+    ) -> Vec<u32> {
+        let n = self.config.channel_count;
+        let mut spike_counts = vec![0u32; n];
+        for _ in 0..timesteps {
+            for (i, neu) in self.neurons.iter_mut().enumerate() {
+                let stimulus: f32 = signals.iter()
+                    .zip(neu.weights.iter())
+                    .map(|(sig, w)| sig * w)
+                    .sum();
+                // Apply serotonin-modulated leak.
+                neu.leak = effective_leaks[i];
+                neu.integrate(stimulus);
+                neu.threshold = effective_thresholds[i];
+                if neu.check_fire().is_some() {
+                    spike_counts[i] += 1;
+                }
+            }
+        }
+        spike_counts
     }
 
     /// Lazily (re)initialize `channel_fatigue` and `baseline_weights` so that
