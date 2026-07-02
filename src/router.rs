@@ -37,14 +37,23 @@ pub struct RouterConfig {
     /// Minimum firing rate to activate a channel.
     pub min_fire_rate: f32,
     /// Weight decay rate for inactive channels (use-it-or-lose-it).
+    #[serde(default = "default_plasticity_decay")]
     pub plasticity_decay: f32,
     /// Weight potentiation rate for active channels (dopamine-gated).
+    #[serde(default = "default_plasticity_potentiate")]
     pub plasticity_potentiate: f32,
     /// Fatigue accumulation rate per activation.
+    #[serde(default = "default_fatigue_accumulation")]
     pub fatigue_accumulation: f32,
     /// Fatigue recovery rate per tick.
+    #[serde(default = "default_fatigue_recovery")]
     pub fatigue_recovery: f32,
 }
+
+fn default_plasticity_decay() -> f32 { 0.02 }
+fn default_plasticity_potentiate() -> f32 { 0.05 }
+fn default_fatigue_accumulation() -> f32 { 0.15 }
+fn default_fatigue_recovery() -> f32 { 0.05 }
 
 impl Default for RouterConfig {
     fn default() -> Self {
@@ -72,7 +81,8 @@ impl Default for RouterConfig {
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct NeuromodState {
     /// Stress level (0.0 = calm, 1.0 = max stress).
-    /// Raises firing thresholds and amplifies fatigue.
+    /// Raises firing thresholds (always — even on fresh / zero-fatigue channels)
+    /// and additionally amplifies the effect of accumulated fatigue.
     pub cortisol: f32,
     /// Reward level (0.0 = no reward, 1.0 = high reward).
     /// Lowers thresholds, strengthens active synapses, counteracts fatigue.
@@ -249,8 +259,16 @@ impl ChannelRouter {
         let mut effective_thresholds = vec![0.0f32; n];
         let mut effective_leaks = vec![0.0f32; n];
         for i in 0..n {
-            // Cortisol amplifies fatigue → higher threshold.
-            let fatigue_factor = 1.0 + mods.cortisol * self.channel_fatigue[i];
+            // Cortisol has two effects:
+            //   1. Baseline stress component: raises the threshold even on a
+            //      fresh / fully-recovered channel (so stress always makes
+            //      activation harder, per the API contract).
+            //   2. Fatigue amplification: further multiplies the threshold
+            //      by accumulated fatigue, so stressed + fatigued channels
+            //      are far harder to drive than either alone.
+            let baseline_stress = 1.0 + mods.cortisol * 0.5;
+            let fatigue_amplification = 1.0 + mods.cortisol * self.channel_fatigue[i];
+            let fatigue_factor = baseline_stress * fatigue_amplification;
             // Dopamine reduces threshold → lower resistance.
             let dopamine_factor = 1.0 - mods.dopamine * 0.5;
             effective_thresholds[i] = (self.config.threshold * fatigue_factor * dopamine_factor)
