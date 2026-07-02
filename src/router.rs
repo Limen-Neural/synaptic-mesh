@@ -42,6 +42,11 @@ pub struct RouterConfig {
     /// Weight potentiation rate for active channels (dopamine-gated).
     #[serde(default = "default_plasticity_potentiate")]
     pub plasticity_potentiate: f32,
+    /// Smoothing factor for active-channel weight potentiation
+    /// (0.0 = no change, 1.0 = snap to amplified target). Tunable so callers
+    /// can trade off adaptation speed vs. numerical stability.
+    #[serde(default = "default_plasticity_speed")]
+    pub plasticity_speed: f32,
     /// Fatigue accumulation rate per activation.
     #[serde(default = "default_fatigue_accumulation")]
     pub fatigue_accumulation: f32,
@@ -52,6 +57,7 @@ pub struct RouterConfig {
 
 fn default_plasticity_decay() -> f32 { 0.02 }
 fn default_plasticity_potentiate() -> f32 { 0.05 }
+fn default_plasticity_speed() -> f32 { 0.1 }
 fn default_fatigue_accumulation() -> f32 { 0.15 }
 fn default_fatigue_recovery() -> f32 { 0.05 }
 
@@ -67,6 +73,7 @@ impl Default for RouterConfig {
             min_fire_rate: MIN_FIRE_RATE,
             plasticity_decay: 0.02,
             plasticity_potentiate: 0.05,
+            plasticity_speed: 0.1,
             fatigue_accumulation: 0.15,
             fatigue_recovery: 0.05,
         }
@@ -249,33 +256,10 @@ impl ChannelRouter {
         let timesteps = self.config.routing_timesteps;
         let min_rate = self.config.min_fire_rate;
 
-        if self.channel_fatigue.len() != n {
-            self.channel_fatigue.resize(n, 0.0);
-        }
-        if self.baseline_weights.len() != n {
-            self.baseline_weights = self.neurons.iter().map(|neu| neu.weights.clone()).collect();
-        }
-
-        let mut effective_thresholds = vec![0.0f32; n];
-        let mut effective_leaks = vec![0.0f32; n];
-        for i in 0..n {
-            // Cortisol has two effects:
-            //   1. Baseline stress component: raises the threshold even on a
-            //      fresh / fully-recovered channel (so stress always makes
-            //      activation harder, per the API contract).
-            //   2. Fatigue amplification: further multiplies the threshold
-            //      by accumulated fatigue, so stressed + fatigued channels
-            //      are far harder to drive than either alone.
-            let baseline_stress = 1.0 + mods.cortisol * 0.5;
-            let fatigue_amplification = 1.0 + mods.cortisol * self.channel_fatigue[i];
-            let fatigue_factor = baseline_stress * fatigue_amplification;
-            // Dopamine reduces threshold → lower resistance.
-            let dopamine_factor = 1.0 - mods.dopamine * 0.5;
-            effective_thresholds[i] = (self.config.threshold * fatigue_factor * dopamine_factor)
-                .clamp(0.05, 2.0);
-            // Serotonin increases leak → faster decay.
-            effective_leaks[i] = (self.config.leak * (1.0 + mods.serotonin)).clamp(0.0, 1.0);
-        }
+        // Self-heal: keep neuromod state vectors aligned with the current
+        // channel count (e.g. after deserializing an older router).
+        self.ensure_neuromod_state_synced();
+        let (effective_thresholds, effective_leaks) = self.compute_effective_params(mods);
 
         // Reset membrane potentials for a fresh routing decision.
         for neu in &mut self.neurons {
@@ -323,14 +307,58 @@ impl ChannelRouter {
         })
     }
 
+    /// Lazily (re)initialize `channel_fatigue` and `baseline_weights` so that
+    /// their lengths match the current channel count. Called at the top of
+    /// `route_modulated` so that deserializing older router states (where
+    /// these fields default to empty) cannot trigger out-of-bounds indexing.
+    fn ensure_neuromod_state_synced(&mut self) {
+        let n = self.config.channel_count;
+        if self.channel_fatigue.len() != n {
+            self.channel_fatigue.resize(n, 0.0);
+        }
+        if self.baseline_weights.len() != n {
+            self.baseline_weights = self.neurons.iter().map(|neu| neu.weights.clone()).collect();
+        }
+    }
+
+    /// Per-channel effective thresholds and leaks under neuromodulation.
+    ///
+    /// - Cortisol: baseline stress component (always raises threshold, even on
+    ///   fresh channels) + fatigue amplification (further raises it on
+    ///   fatigued channels).
+    /// - Dopamine: lowers threshold (conductance).
+    /// - Serotonin: raises leak (faster decay).
+    fn compute_effective_params(&self, mods: &NeuromodState) -> (Vec<f32>, Vec<f32>) {
+        let n = self.config.channel_count;
+        let mut thresholds = vec![0.0f32; n];
+        let mut leaks = vec![0.0f32; n];
+        for i in 0..n {
+            let baseline_stress = 1.0 + mods.cortisol * 0.5;
+            let fatigue_amplification = 1.0 + mods.cortisol * self.channel_fatigue[i];
+            let fatigue_factor = baseline_stress * fatigue_amplification;
+            let dopamine_factor = 1.0 - mods.dopamine * 0.5;
+            thresholds[i] = (self.config.threshold * fatigue_factor * dopamine_factor)
+                .clamp(0.05, 2.0);
+            leaks[i] = (self.config.leak * (1.0 + mods.serotonin)).clamp(0.0, 1.0);
+        }
+        (thresholds, leaks)
+    }
+
     /// Apply use-it-or-lose-it plasticity.
     ///
     /// - Active channels: strengthen (dopamine-gated), accumulate fatigue
     /// - Inactive channels: decay toward baseline weights, recover fatigue
+    ///
+    /// Weights are clamped to a unified range that covers both the
+    /// self-affinity range ([0.1, 2.0]) and the cross-channel range
+    /// ([-1.0, 1.5]) used by `apply_feedback`. This prevents the
+    /// use-it-or-lose-it decay from drifting into a regime where the
+    /// downstream `apply_feedback` clamp would suddenly snap a weight.
     fn apply_plasticity(&mut self, active_channels: &[usize], mods: &NeuromodState) {
         let n = self.config.channel_count;
         let decay = self.config.plasticity_decay;
         let potentiate = self.config.plasticity_potentiate;
+        let plasticity_speed = self.config.plasticity_speed;
         let fatigue_acc = self.config.fatigue_accumulation;
         let fatigue_rec = self.config.fatigue_recovery;
 
@@ -343,7 +371,8 @@ impl ChannelRouter {
                     let current = self.neurons[i].weights[j];
                     // Move toward amplified baseline.
                     let target = baseline * (1.0 + strengthen);
-                    self.neurons[i].weights[j] = current + (target - current) * 0.1;
+                    self.neurons[i].weights[j] =
+                        (current + (target - current) * plasticity_speed).clamp(-1.5, 2.0);
                 }
                 self.channel_fatigue[i] = (self.channel_fatigue[i] + fatigue_acc).min(1.0);
             } else {
@@ -351,7 +380,8 @@ impl ChannelRouter {
                 for j in 0..n {
                     let baseline = self.baseline_weights[i][j];
                     let current = self.neurons[i].weights[j];
-                    self.neurons[i].weights[j] = current + (baseline - current) * decay;
+                    self.neurons[i].weights[j] =
+                        (current + (baseline - current) * decay).clamp(-1.5, 2.0);
                 }
                 self.channel_fatigue[i] = (self.channel_fatigue[i] - fatigue_rec).max(0.0);
             }
@@ -377,15 +407,26 @@ impl ChannelRouter {
             }
         }
 
-        if self.baseline_weights.len() == n {
-            self.baseline_weights[channel_idx][channel_idx] =
-                self.neurons[channel_idx].weights[channel_idx];
-            if reward > 0.0 {
-                for j in 0..n {
-                    if j != channel_idx {
-                        self.baseline_weights[j][channel_idx] =
-                            self.neurons[j].weights[channel_idx];
-                    }
+        // Keep plasticity baseline in sync with feedback-driven learning.
+        self.sync_baseline_after_feedback(channel_idx, reward);
+    }
+
+    /// Sync `baseline_weights` for the rows affected by a feedback call so that
+    /// the new feedback-adjusted weights become the reference point for future
+    /// use-it-or-lose-it decay. Skipped if `baseline_weights` hasn't been
+    /// initialized yet (e.g. before the first `route_modulated` call).
+    fn sync_baseline_after_feedback(&mut self, channel_idx: usize, reward: f32) {
+        let n = self.config.channel_count;
+        if self.baseline_weights.len() != n {
+            return;
+        }
+        self.baseline_weights[channel_idx][channel_idx] =
+            self.neurons[channel_idx].weights[channel_idx];
+        if reward > 0.0 {
+            for j in 0..n {
+                if j != channel_idx {
+                    self.baseline_weights[j][channel_idx] =
+                        self.neurons[j].weights[channel_idx];
                 }
             }
         }

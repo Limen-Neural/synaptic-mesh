@@ -422,6 +422,35 @@ fn router_config_backward_compatible_serde() {
     assert_eq!(cfg.channel_count, 3);
     assert!((cfg.plasticity_decay - 0.02).abs() < 1e-6);
     assert!((cfg.plasticity_potentiate - 0.05).abs() < 1e-6);
+    assert!((cfg.plasticity_speed - 0.1).abs() < 1e-6);
     assert!((cfg.fatigue_accumulation - 0.15).abs() < 1e-6);
     assert!((cfg.fatigue_recovery - 0.05).abs() < 1e-6);
+}
+
+#[test]
+fn plasticity_speed_tunes_adaptation_rate() {
+    // Higher plasticity_speed → faster convergence to the amplified target.
+    let cfg_slow = RouterConfig {
+        plasticity_potentiate: 0.2,
+        plasticity_speed: 0.05,
+        ..RouterConfig::default()
+    };
+    let cfg_fast = RouterConfig {
+        plasticity_potentiate: 0.2,
+        plasticity_speed: 0.5,
+        ..RouterConfig::default()
+    };
+
+    let mut slow = ChannelRouter::with_config(cfg_slow);
+    let mut fast = ChannelRouter::with_config(cfg_fast);
+
+    let _ = slow.route(&[1.0, 0.0, 0.0]).unwrap();
+    let _ = fast.route(&[1.0, 0.0, 0.0]).unwrap();
+
+    let w_slow = slow.weight_matrix()[0][0];
+    let w_fast = fast.weight_matrix()[0][0];
+
+    assert!(w_fast > w_slow,
+        "Faster plasticity_speed should produce a larger weight after one active route: \
+         slow={w_slow}, fast={w_fast}");
 }
