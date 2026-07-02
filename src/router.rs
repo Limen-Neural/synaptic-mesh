@@ -430,7 +430,13 @@ impl ChannelRouter {
     }
 
     /// Apply feedback to adjust synaptic weights for a specific channel.
+    ///
+    /// Self-heals `channel_fatigue` and `baseline_weights` before any indexing,
+    /// so calling `apply_feedback` on a freshly deserialized router (where
+    /// the lazy repair in `route_modulated` has not yet run) is safe. See
+    /// `ensure_neuromod_state_synced` for the exact shape check.
     pub fn apply_feedback(&mut self, channel_idx: usize, reward: f32) {
+        self.ensure_neuromod_state_synced();
         let n = self.config.channel_count;
         if channel_idx >= n { return; }
 

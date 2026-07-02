@@ -223,6 +223,38 @@ fn deserialized_router_with_empty_inner_baseline_weights_recovers() {
 }
 
 #[test]
+fn apply_feedback_on_deserialized_router_with_malformed_baseline_does_not_panic() {
+    // Regression test for chatgpt-codex P2 thread #NyuBl / devin-ai BUG #NytR0.
+    // Calling `apply_feedback` on a deserialized router whose `baseline_weights`
+    // outer length matches the channel count but whose inner rows are empty
+    // (the same shape that `route_modulated` already repairs) used to panic at
+    // `baseline_weights[channel_idx][channel_idx]` inside `sync_baseline_after_feedback`.
+    //
+    // The fix: `apply_feedback` now calls `ensure_neuromod_state_synced` at the
+    // top, which rebuilds the full 2D table from the current neuron weights
+    // before any indexing happens. This test exercises the path *without* going
+    // through `route_modulated` first.
+    let router = ChannelRouter::new();
+    let mut json: serde_json::Value = serde_json::to_value(&router)
+        .expect("Fresh router must serialize");
+    // Force the malformed-payload case: outer length matches channel count (3)
+    // but each row is empty.
+    json["baseline_weights"] = serde_json::json!([[], [], []]);
+
+    let mut router: ChannelRouter = serde_json::from_value(json)
+        .expect("Malformed-payload router should still deserialize");
+
+    // `apply_feedback` must self-heal instead of panicking on
+    // `baseline_weights[channel_idx][channel_idx]`.
+    router.apply_feedback(0, 1.0);
+
+    // And the self-heal must leave a well-formed `baseline_weights` table behind.
+    let w = router.weight_matrix();
+    assert_eq!(w.len(), 3, "channel count must be intact after feedback");
+    assert_eq!(w[0].len(), 3, "weights[0] must be intact after feedback");
+}
+
+#[test]
 #[should_panic(expected = "routing_timesteps must be > 0")]
 fn zero_routing_timesteps_panics() {
     let config = RouterConfig {
