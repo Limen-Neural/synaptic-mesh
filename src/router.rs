@@ -225,8 +225,14 @@ impl ChannelRouter {
     /// Route raw channel signals through the SNN (non-modulated).
     ///
     /// `signals` must have length equal to `config.channel_count`.
+    ///
+    /// Backward-compatible thin wrapper around [`route_modulated`]. The error
+    /// context reported on a signal-length mismatch is `"route signals"`,
+    /// matching the original pre-neuromodulation API — callers using this
+    /// public method see the same error message they did before, even though
+    /// the implementation now delegates to `route_modulated` internally.
     pub fn route<S: AsRef<[f32]>>(&mut self, signals: S) -> Result<RoutingDecision, crate::error::MeshError> {
-        self.route_modulated(signals, &NeuromodState::balanced())
+        self.route_modulated_with_context(signals, &NeuromodState::balanced(), "route signals")
     }
 
     /// Route with neuromodulatory modulation.
@@ -243,13 +249,25 @@ impl ChannelRouter {
         signals: S,
         mods: &NeuromodState,
     ) -> Result<RoutingDecision, crate::error::MeshError> {
+        self.route_modulated_with_context(signals, mods, "route_modulated signals")
+    }
+
+    /// Internal routing implementation. The `error_context` argument is the
+    /// string used in the `NeuronCountMismatch` error so each public entry
+    /// point can report the method the caller actually invoked.
+    fn route_modulated_with_context<S: AsRef<[f32]>>(
+        &mut self,
+        signals: S,
+        mods: &NeuromodState,
+        error_context: &str,
+    ) -> Result<RoutingDecision, crate::error::MeshError> {
         let signals = signals.as_ref();
         let n = self.config.channel_count;
         if signals.len() != n {
             return Err(crate::error::MeshError::NeuronCountMismatch {
                 expected: n,
                 got: signals.len(),
-                context: "route_modulated signals".into(),
+                context: error_context.into(),
             });
         }
 
@@ -311,12 +329,20 @@ impl ChannelRouter {
     /// their lengths match the current channel count. Called at the top of
     /// `route_modulated` so that deserializing older router states (where
     /// these fields default to empty) cannot trigger out-of-bounds indexing.
+    ///
+    /// Validates BOTH the outer length AND the inner row length of
+    /// `baseline_weights`. A deserialized value like `[[], [], []]` would
+    /// pass an outer-length-only check and then panic in `apply_plasticity`
+    /// at `self.baseline_weights[i][j]`. If any row is the wrong size we
+    /// rebuild the whole 2D table from the current neuron weights.
     fn ensure_neuromod_state_synced(&mut self) {
         let n = self.config.channel_count;
         if self.channel_fatigue.len() != n {
             self.channel_fatigue.resize(n, 0.0);
         }
-        if self.baseline_weights.len() != n {
+        let baseline_ok = self.baseline_weights.len() == n
+            && self.baseline_weights.iter().all(|row| row.len() == n);
+        if !baseline_ok {
             self.baseline_weights = self.neurons.iter().map(|neu| neu.weights.clone()).collect();
         }
     }

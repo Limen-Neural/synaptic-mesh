@@ -168,6 +168,61 @@ fn route_rejects_mismatched_length() {
 }
 
 #[test]
+fn route_error_context_reports_public_method_name() {
+    // The error returned by `route()` on a signal-length mismatch must use the
+    // "route signals" context (matching the original pre-neuromodulation API),
+    // not "route_modulated signals" — because callers of `route()` never
+    // invoked `route_modulated` and would be confused by that string.
+    let mut router = ChannelRouter::new();
+    let err = router.route(&[1.0, 0.0]).unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("route signals"),
+        "route() error must reference \"route signals\", got: {msg}");
+    assert!(!msg.contains("route_modulated"),
+        "route() error must NOT leak the internal method name, got: {msg}");
+}
+
+#[test]
+fn route_modulated_error_context_reports_internal_method_name() {
+    // Conversely, `route_modulated()` reports its own name in the error.
+    let mut router = ChannelRouter::new();
+    let err = router.route_modulated(&[1.0, 0.0], &NeuromodState::balanced()).unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("route_modulated signals"),
+        "route_modulated() error must reference \"route_modulated signals\", got: {msg}");
+}
+
+#[test]
+fn deserialized_router_with_empty_inner_baseline_weights_recovers() {
+    // Regression test: a router deserialized from a payload that was produced
+    // with the wrong inner-row shape for `baseline_weights` (e.g. `[[], [], []]`)
+    // used to panic at the first `apply_plasticity` call. The lazy repair in
+    // `ensure_neuromod_state_synced` must now rebuild the full 2D table from
+    // the current neuron weights when ANY row is the wrong size.
+    //
+    // We drive the test through the public serde API: build a valid router,
+    // serialize it, mutate the JSON to drop the inner rows of `baseline_weights`,
+    // and confirm the router self-heals on the first modulated route instead
+    // of panicking at `apply_plasticity`.
+    let router = ChannelRouter::new();
+    let mut json: serde_json::Value = serde_json::to_value(&router)
+        .expect("Fresh router must serialize");
+    // Force the malformed-payload case: outer length matches channel count (3)
+    // but each row is empty.
+    json["baseline_weights"] = serde_json::json!([[], [], []]);
+
+    let mut router: ChannelRouter = serde_json::from_value(json)
+        .expect("Malformed-payload router should still deserialize (lazy repair on first route)");
+
+    // The first modulated route must self-heal instead of panicking on
+    // `apply_plasticity` indexing `baseline_weights[i][j]`.
+    let result = router.route_modulated(&[0.5, 0.0, 0.0], &NeuromodState::balanced());
+    assert!(result.is_ok(),
+        "Malformed baseline_weights must self-heal on first route: {:?}",
+        result.err());
+}
+
+#[test]
 #[should_panic(expected = "routing_timesteps must be > 0")]
 fn zero_routing_timesteps_panics() {
     let config = RouterConfig {
@@ -348,26 +403,43 @@ fn dopamine_counteracts_fatigue() {
 
 #[test]
 fn least_resistance_pathway_routing() {
+    // The router should prefer channels with less fatigue. Heavily-fatigued
+    // channels should have a measurably lower firing rate than fresh ones
+    // under the same input, because the effective threshold scales up with
+    // fatigue.
+    //
+    // The previous version of this test built fatigue up by running 10 routes
+    // of `[1.0, 0.0, 0.0]`, but that ALSO strengthened `weights[0][0]` via
+    // dopamine-independent potentiation in `apply_plasticity`. The stronger
+    // self-weight compensated the fatigue-induced threshold bump, so the
+    // measured rate did not actually drop. We now inject fatigue directly via
+    // the public `channel_fatigue` field and keep the weight matrix at its
+    // baseline — isolating the fatigue → threshold → rate mechanism.
+    //
+    // Signal / threshold tuned so the equilibrium membrane potential hovers
+    // right at the fresh-router threshold. With fatigue the equilibrium stays
+    // strictly sub-threshold, driving the fatigued rate to 0 while the fresh
+    // rate remains > 0. This produces a clean, unambiguous gap.
     let config = RouterConfig {
         channel_count: 3,
-        fatigue_accumulation: 0.4,
-        fatigue_recovery: 0.02,
-        threshold: 0.15,
+        threshold: 0.25,
         ..RouterConfig::default()
     };
     let mut router = ChannelRouter::with_config(config);
 
     let low_cortisol = NeuromodState { cortisol: 0.3, ..NeuromodState::default() };
 
+    // Baseline: fresh router, channel 0 fatigue = 0.
+    // Effective threshold ≈ 0.25 * 1.15 = 0.2875. Stimulus = 0.18 → fire.
     let d_baseline = router.route_modulated(&[0.3, 0.3, 0.3], &low_cortisol).unwrap();
     let rate_baseline = d_baseline.firing_rates[0];
 
-    for _ in 0..10 {
-        let _ = router.route(&[1.0, 0.0, 0.0]).unwrap();
-    }
-    let fatigue_ch0 = router.channel_fatigue[0];
-    assert!(fatigue_ch0 > 0.8, "Channel 0 should be heavily fatigued: {fatigue_ch0}");
-
+    // Inject high fatigue on channel 0 directly. Weights are unchanged from
+    // baseline, so any rate change is purely due to the fatigue-driven
+    // threshold increase.
+    // Effective threshold ≈ 0.25 * 1.15 * 1.3 = 0.374. Stimulus = 0.18 < 0.374
+    // → no firing.
+    router.channel_fatigue[0] = 1.0;
     let d_fatigued = router.route_modulated(&[0.3, 0.3, 0.3], &low_cortisol).unwrap();
     let rate_fatigued = d_fatigued.firing_rates[0];
 
@@ -387,15 +459,27 @@ fn cortisol_increases_resistance_on_fresh_router() {
     // stressed threshold (0.22 * 1.5 = 0.33) it stays sub-threshold for the
     // full 16-timestep integration window. This gives a clear, reproducible
     // gap between balanced and stressed rates on a fresh router.
-    let mut router = ChannelRouter::new();
-    assert!(router.channel_fatigue.iter().all(|&f| f == 0.0),
-        "Pre-condition: fresh router has zero fatigue on every channel");
+    //
+    // Two independent fresh routers are used so that the calm path's
+    // `apply_plasticity` side effects (channel 0 fatigue accumulation and
+    // dopamine-independent potentiation of `weights[0][0]`) cannot leak into
+    // the stressed path. The stressed call must stand on its own as a
+    // "brand-new router with zero fatigue" measurement.
+    let mut calm_router = ChannelRouter::new();
+    let mut stressed_router = ChannelRouter::new();
+    assert!(calm_router.channel_fatigue.iter().all(|&f| f == 0.0)
+        && stressed_router.channel_fatigue.iter().all(|&f| f == 0.0),
+        "Pre-condition: both fresh routers have zero fatigue on every channel");
 
-    let d_calm = router.route_modulated(&[0.05, 0.0, 0.0], &NeuromodState::balanced()).unwrap();
+    let d_calm = calm_router
+        .route_modulated(&[0.05, 0.0, 0.0], &NeuromodState::balanced())
+        .unwrap();
     let rate_calm = d_calm.firing_rates[0];
 
     let stressed = NeuromodState { cortisol: 1.0, ..NeuromodState::default() };
-    let d_stressed = router.route_modulated(&[0.05, 0.0, 0.0], &stressed).unwrap();
+    let d_stressed = stressed_router
+        .route_modulated(&[0.05, 0.0, 0.0], &stressed)
+        .unwrap();
     let rate_stressed = d_stressed.firing_rates[0];
 
     assert!(rate_stressed < rate_calm,
