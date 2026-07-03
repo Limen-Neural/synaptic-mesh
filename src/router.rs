@@ -463,8 +463,8 @@ impl ChannelRouter {
     /// `ensure_neuromod_state_synced` for the exact shape check.
     pub fn apply_feedback(&mut self, channel_idx: usize, reward: f32) {
         self.ensure_neuromod_state_synced();
-        let n = self.neurons.len();
-        if channel_idx >= n {
+        let n = self.config.channel_count;
+        if channel_idx >= n || channel_idx >= self.neurons.len() {
             return;
         }
 
@@ -491,7 +491,7 @@ impl ChannelRouter {
     /// use-it-or-lose-it decay. Skipped if `baseline_weights` hasn't been
     /// initialized yet (e.g. before the first `route_modulated` call).
     fn sync_baseline_after_feedback(&mut self, channel_idx: usize, reward: f32) {
-        let n = self.neurons.len();
+        let n = self.config.channel_count;
         if self.baseline_weights.len() != n
             || !self.baseline_weights.iter().all(|row| row.len() == n)
         {
