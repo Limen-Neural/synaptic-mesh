@@ -492,7 +492,9 @@ impl ChannelRouter {
     /// initialized yet (e.g. before the first `route_modulated` call).
     fn sync_baseline_after_feedback(&mut self, channel_idx: usize, reward: f32) {
         let n = self.neurons.len();
-        if self.baseline_weights.len() != n {
+        if self.baseline_weights.len() != n
+            || !self.baseline_weights.iter().all(|row| row.len() == n)
+        {
             return;
         }
         self.baseline_weights[channel_idx][channel_idx] =
