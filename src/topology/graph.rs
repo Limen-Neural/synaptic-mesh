@@ -116,13 +116,13 @@ impl SynapticGraph {
             if desc.source as usize >= neuron_count {
                 return Err(MeshError::IndexOutOfBounds {
                     index: desc.source as usize,
-                    max: neuron_count - 1,
+                    max: neuron_count.saturating_sub(1),
                 });
             }
             if desc.target as usize >= neuron_count {
                 return Err(MeshError::IndexOutOfBounds {
                     index: desc.target as usize,
-                    max: neuron_count - 1,
+                    max: neuron_count.saturating_sub(1),
                 });
             }
         }

@@ -492,9 +492,16 @@ impl ChannelRouter {
     /// initialized yet (e.g. before the first `route_modulated` call).
     fn sync_baseline_after_feedback(&mut self, channel_idx: usize, reward: f32) {
         let n = self.config.channel_count;
-        if self.baseline_weights.len() != n
-            || !self.baseline_weights.iter().all(|row| row.len() == n)
-        {
+        // Belt-and-suspenders: ensure_neuromod_state_synced() in apply_feedback
+        // should have already rebuilt baseline_weights if rows were malformed,
+        // but guard anyway to avoid a panic if the call ordering invariant
+        // is ever violated.
+        debug_assert!(
+            self.baseline_weights.len() == n
+                && self.baseline_weights.iter().all(|row| row.len() == n),
+            "baseline_weights shape mismatch — ensure_neuromod_state_synced should have rebuilt"
+        );
+        if self.baseline_weights.len() != n {
             return;
         }
         self.baseline_weights[channel_idx][channel_idx] =
