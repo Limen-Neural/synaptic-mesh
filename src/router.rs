@@ -504,8 +504,11 @@ impl ChannelRouter {
                 && self.baseline_weights.iter().all(|row| row.len() == n),
             "baseline_weights shape mismatch — ensure_neuromod_state_synced should have rebuilt"
         );
-        if self.baseline_weights.len() != n {
+        if self.baseline_weights.len() != n
+            || self.baseline_weights.iter().any(|row| row.len() != n)
+        {
             return;
+        }
         }
         self.baseline_weights[channel_idx][channel_idx] =
             self.neurons[channel_idx].weights[channel_idx];
