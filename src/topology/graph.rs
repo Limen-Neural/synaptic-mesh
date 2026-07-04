@@ -112,6 +112,11 @@ impl SynapticGraph {
         neuron_count: usize,
         descriptors: &[SynapseDescriptor],
     ) -> Result<()> {
+        if neuron_count == 0 && !descriptors.is_empty() {
+            return Err(MeshError::InvalidConfig(
+                "descriptors provided for a graph with 0 neurons".into(),
+            ));
+        }
         for desc in descriptors {
             if desc.source as usize >= neuron_count {
                 return Err(MeshError::IndexOutOfBounds {
