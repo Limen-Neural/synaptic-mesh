@@ -426,6 +426,11 @@ impl ChannelRouter {
     /// downstream `apply_feedback` clamp would suddenly snap a weight.
     fn apply_plasticity(&mut self, active_channels: &[usize], mods: &NeuromodState) {
         let n = self.config.channel_count;
+        // Guard against malformed deserialized state where channel_count
+        // exceeds actual neuron vector length (same guard as apply_feedback).
+        if n > self.neurons.len() {
+            return;
+        }
         let decay = self.config.plasticity_decay;
         let potentiate = self.config.plasticity_potentiate;
         let plasticity_speed = self.config.plasticity_speed;
