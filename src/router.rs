@@ -343,7 +343,11 @@ impl ChannelRouter {
         let n = self.config.channel_count;
         let mut spike_counts = vec![0u32; n];
         for _ in 0..timesteps {
-            for (i, neu) in self.neurons.iter_mut().enumerate() {
+            // Iterate only up to n (channel_count) so we never index beyond
+            // spike_counts, effective_thresholds, or effective_leaks. If
+            // neurons.len() > n (malformed state), the extra neurons are
+            // skipped. If neurons.len() < n, those channels produce no spikes.
+            for (i, neu) in self.neurons.iter_mut().enumerate().take(n) {
                 debug_assert_eq!(
                     neu.weights.len(),
                     signals.len(),
@@ -354,7 +358,6 @@ impl ChannelRouter {
                     .zip(neu.weights.iter())
                     .map(|(sig, w)| sig * w)
                     .sum();
-                // Apply serotonin-modulated leak.
                 neu.leak = effective_leaks[i];
                 neu.integrate(stimulus);
                 neu.threshold = effective_thresholds[i];
