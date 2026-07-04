@@ -486,8 +486,12 @@ impl ChannelRouter {
         let n = self.config.channel_count;
         // Guard both the direct channel_idx access AND the loop that indexes
         // neurons[j] for j in 0..n. A malformed deserialized state could have
-        // config.channel_count > neurons.len(), which would panic in the loop.
-        if channel_idx >= n || n > self.neurons.len() {
+        // config.channel_count > neurons.len() or any neuron's weights vector
+        // shorter than n, either of which would panic in the loop below.
+        if channel_idx >= n
+            || n > self.neurons.len()
+            || self.neurons.iter().any(|neu| neu.weights.len() < n)
+        {
             return;
         }
 
