@@ -512,7 +512,6 @@ impl ChannelRouter {
         {
             return;
         }
-        }
         self.baseline_weights[channel_idx][channel_idx] =
             self.neurons[channel_idx].weights[channel_idx];
         if reward > 0.0 {
