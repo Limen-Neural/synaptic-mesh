@@ -369,22 +369,44 @@ impl ChannelRouter {
         spike_counts
     }
 
-    /// Lazily (re)initialize `channel_fatigue` and `baseline_weights` so that
-    /// their lengths match the current channel count. Called at the top of
-    /// `route_modulated` so that deserializing older router states (where
-    /// these fields default to empty) cannot trigger out-of-bounds indexing.
+    /// Lazily (re)initialize `channel_fatigue`, `baseline_weights`, and
+    /// individual neuron weight vectors so that their lengths match the
+    /// current channel count. Called at the top of `route_modulated` so
+    /// that deserializing older router states (where these fields may have
+    /// stale or mismatched lengths) cannot trigger out-of-bounds indexing.
     ///
-    /// Validates BOTH the outer length AND the inner row length of
-    /// `baseline_weights`. A deserialized value like `[[], [], []]` would
-    /// pass an outer-length-only check and then panic in `apply_plasticity`
-    /// at `self.baseline_weights[i][j]`. If any row is the wrong size we
-    /// rebuild the whole 2D table from the current neuron weights.
+    /// Repairs three layers of state:
+    /// 1. `channel_fatigue` — resized to `n` (zero-filled).
+    /// 2. Each neuron's `weights` vector — truncated or zero-padded to `n`
+    ///    so that `integrate_signals`, `apply_plasticity`, and
+    ///    `apply_feedback` can safely index `neurons[i].weights[j]`.
+    /// 3. `baseline_weights` — rebuilt from the (now-repaired) neuron
+    ///    weights if any row is the wrong size.
     fn ensure_neuromod_state_synced(&mut self) {
         let n = self.config.channel_count;
+
+        // 1. Repair channel_fatigue length.
         if self.channel_fatigue.len() != n {
             self.channel_fatigue.resize(n, 0.0);
         }
-        let baseline_ok = self.baseline_weights.len() == n
+
+        // 2. Repair individual neuron weight vectors.
+        //    A deserialized neuron may have weights.len() != n (e.g.
+        //    serialized with an older channel_count). Truncate or
+        //    zero-pad each to exactly n.
+        let mut weights_repaired = false;
+        for neu in &mut self.neurons {
+            if neu.weights.len() != n {
+                weights_repaired = true;
+                neu.weights.resize(n, 0.0);
+            }
+        }
+
+        // 3. Repair baseline_weights (rebuild from neuron weights if
+        //    any row is the wrong size, or if weights were repaired
+        //    in step 2).
+        let baseline_ok = !weights_repaired
+            && self.baseline_weights.len() == n
             && self.baseline_weights.iter().all(|row| row.len() == n);
         if !baseline_ok {
             self.baseline_weights = self.neurons.iter().map(|neu| neu.weights.clone()).collect();
@@ -484,10 +506,16 @@ impl ChannelRouter {
     pub fn apply_feedback(&mut self, channel_idx: usize, reward: f32) {
         self.ensure_neuromod_state_synced();
         let n = self.config.channel_count;
-        // Guard both the direct channel_idx access AND the loop that indexes
-        // neurons[j] for j in 0..n. A malformed deserialized state could have
-        // config.channel_count > neurons.len() or any neuron's weights vector
-        // shorter than n, either of which would panic in the loop below.
+        // Guard all indexing: channel_idx bounds, neuron vector length,
+        // and individual neuron weight vector lengths. A malformed
+        // deserialized state could have short weight rows even when
+        // neurons.len() >= n.
+        debug_assert!(
+            channel_idx < n
+                && self.neurons.len() >= n
+                && self.neurons.iter().all(|neu| neu.weights.len() >= n),
+            "apply_feedback invariant violation — ensure_neuromod_state_synced should have rebuilt"
+        );
         if channel_idx >= n
             || n > self.neurons.len()
             || self.neurons.iter().any(|neu| neu.weights.len() < n)
