@@ -326,15 +326,15 @@ mod tests {
     fn layered_mesh_feed_forward() {
         // generate_layered(&[4, 8, 2], inter_layer_p, max_delay, inh_fraction)
         // Neuron layout: [0..4) input, [4..12) hidden, [12..14) output
+        //
+        // NOTE: This test depends on the deterministic hash-based weight
+        // generation. The threshold (0.5) and inhibitory fraction (0.2) are
+        // chosen so that excitatory contributions dominate for enough hidden
+        // neurons to activate the output layer. If the hash function or weight
+        // parameters change, the threshold or layer sizes may need adjustment.
         let graph = generate_layered(&[4, 8, 2], 1.0, 3, 0.2).unwrap();
         let mut mesh = SynapticMesh::new(graph);
         assert_eq!(mesh.neuron_count(), 14);
-
-        // `propagate()` is a one-hop operation: it injects outgoing synapses
-        // from *currently firing* neurons into the delay buffer and drains
-        // currents that have arrived this tick. It does NOT threshold-and-fire
-        // internally. To observe multi-hop feed-forward propagation, the test
-        // harness must feed received currents back as spikes.
         let mut spikes = vec![false; 14];
         for spike in spikes.iter_mut().take(4) {
             *spike = true; // fire input layer

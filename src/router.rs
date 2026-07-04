@@ -464,7 +464,10 @@ impl ChannelRouter {
     pub fn apply_feedback(&mut self, channel_idx: usize, reward: f32) {
         self.ensure_neuromod_state_synced();
         let n = self.config.channel_count;
-        if channel_idx >= n || channel_idx >= self.neurons.len() {
+        // Guard both the direct channel_idx access AND the loop that indexes
+        // neurons[j] for j in 0..n. A malformed deserialized state could have
+        // config.channel_count > neurons.len(), which would panic in the loop.
+        if channel_idx >= n || n > self.neurons.len() {
             return;
         }
 
