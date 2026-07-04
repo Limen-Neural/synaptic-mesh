@@ -1,7 +1,7 @@
 [package]
 name = "synaptic-mesh"
 edition = "2024"
-license = "GPL-3.0-or-later"
+license = "MIT OR Apache-2.0"
 description = "An SNN based mesh for managing the wiring, topology, and temporal delays between neurons."
 repository = "https://github.com/Limen-Neural/synaptic-mesh"
 keywords = ["snn", "neuromorphic", "routing", "lif", "spikenaut"]

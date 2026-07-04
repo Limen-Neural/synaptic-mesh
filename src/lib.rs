@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! # synaptic-mesh
 //!
 //! Manages the wiring, topology, and temporal delays between neurons in
@@ -88,9 +90,9 @@
 pub mod delay;
 pub mod error;
 pub mod mesh;
+pub mod neuromod;
 pub mod topology;
 pub mod types;
-pub mod neuromod;
 
 // ── Existing modules: router + sparse maps ────────────────────────────────────
 pub mod router;
@@ -110,14 +112,14 @@ pub use types::{
 pub use neuromod::NeuromodNeuron;
 
 // Generic router exports
-pub use router::{ChannelRouter, RouterConfig, RoutingDecision, NeuromodState};
+pub use router::{ChannelRouter, NeuromodState, RouterConfig, RoutingDecision};
 
 // Backward-compatible router exports (deprecated)
-pub use router::{AhlRouter, AHL_NUM_CHANNELS};
+pub use router::{AHL_NUM_CHANNELS, AhlRouter};
 
 // Sparse map exports
 pub use sparse::{
-    RoutingPolicy, SparseSynapticMap, SparseSynapticMapBuilder, Synapse, NeuronStateSnapshot,
+    NeuronStateSnapshot, RoutingPolicy, SparseSynapticMap, SparseSynapticMapBuilder, Synapse,
 };
 
 // Backward-compatible sparse exports (deprecated)

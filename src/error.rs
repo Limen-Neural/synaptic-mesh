@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Error types for `synaptic-mesh`.
 //!
 //! Follows the `corinth-canal` pattern of a single unified error enum

@@ -1,11 +1,17 @@
-use crate::router::{ChannelRouter, RouterConfig, NeuromodState};
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 use crate::neuromod::NeuromodNeuron;
+use crate::router::{ChannelRouter, NeuromodState, RouterConfig};
 
 #[test]
 fn channel_0_pulse_activates_channel_0() {
     let mut router = ChannelRouter::new();
-    let d = router.route(&[1.0, 0.0, 0.0]).unwrap();
-    assert!(d.is_active(0), "Channel 0 should be active, firing rate was {:?}", d.firing_rates[0]);
+    let d = router.route([1.0, 0.0, 0.0]).unwrap();
+    assert!(
+        d.is_active(0),
+        "Channel 0 should be active, firing rate was {:?}",
+        d.firing_rates[0]
+    );
     assert!(!d.is_active(1));
     assert!(!d.is_active(2));
 }
@@ -13,7 +19,7 @@ fn channel_0_pulse_activates_channel_0() {
 #[test]
 fn channel_1_pulse_activates_channel_1() {
     let mut router = ChannelRouter::new();
-    let d = router.route(&[0.0, 1.0, 0.0]).unwrap();
+    let d = router.route([0.0, 1.0, 0.0]).unwrap();
     assert!(d.is_active(1));
     assert!(!d.is_active(0));
 }
@@ -21,16 +27,19 @@ fn channel_1_pulse_activates_channel_1() {
 #[test]
 fn background_noise_routes_nowhere() {
     let mut router = ChannelRouter::new();
-    let d = router.route(&[0.05, 0.05, 0.05]).unwrap();
+    let d = router.route([0.05, 0.05, 0.05]).unwrap();
     assert!(d.is_empty());
 }
 
 #[test]
 fn firing_rates_in_range() {
     let mut router = ChannelRouter::new();
-    let d = router.route(&[0.8, 0.2, 0.1]).unwrap();
+    let d = router.route([0.8, 0.2, 0.1]).unwrap();
     for &rate in &d.firing_rates {
-        assert!(rate >= 0.0 && rate <= 1.0, "firing rate out of range: {rate}");
+        assert!(
+            (0.0..=1.0).contains(&rate),
+            "firing rate out of range: {rate}"
+        );
     }
 }
 
@@ -55,11 +64,11 @@ fn negative_feedback_decreases_weight() {
 #[test]
 fn global_gain_inhibits_firing() {
     let mut router = ChannelRouter::new();
-    let d1 = router.route(&[0.5, 0.0, 0.0]).unwrap();
+    let d1 = router.route([0.5, 0.0, 0.0]).unwrap();
     assert!(d1.is_active(0));
 
     router.set_global_gain(0.1);
-    let d2 = router.route(&[0.5, 0.0, 0.0]).unwrap();
+    let d2 = router.route([0.5, 0.0, 0.0]).unwrap();
     assert!(d2.is_empty(), "Reduced gain should have inhibited firing");
 }
 
@@ -67,8 +76,8 @@ fn global_gain_inhibits_firing() {
 fn total_routes_increments() {
     let mut router = ChannelRouter::new();
     assert_eq!(router.total_routes, 0);
-    router.route(&[0.0, 0.0, 0.0]).unwrap();
-    router.route(&[0.0, 0.0, 0.0]).unwrap();
+    router.route([0.0, 0.0, 0.0]).unwrap();
+    router.route([0.0, 0.0, 0.0]).unwrap();
     assert_eq!(router.total_routes, 2);
 }
 
@@ -100,7 +109,7 @@ fn five_channel_router_routes_correctly() {
         ..RouterConfig::default()
     };
     let mut router = ChannelRouter::with_config(config);
-    let d = router.route(&[1.0, 0.0, 0.0, 0.0, 0.0]).unwrap();
+    let d = router.route([1.0, 0.0, 0.0, 0.0, 0.0]).unwrap();
     assert!(d.is_active(0));
     assert!(!d.is_active(1));
     assert!(!d.is_active(4));
@@ -114,7 +123,9 @@ fn eight_channel_router_routes_correctly() {
         ..RouterConfig::default()
     };
     let mut router = ChannelRouter::with_config(config);
-    let d = router.route(&[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]).unwrap();
+    let d = router
+        .route([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0])
+        .unwrap();
     assert!(d.is_active(3));
     assert!(!d.is_active(0));
     assert_eq!(d.firing_rates.len(), 8);
@@ -127,7 +138,7 @@ fn single_channel_router_always_routes() {
         ..RouterConfig::default()
     };
     let mut router = ChannelRouter::with_config(config);
-    let d = router.route(&[1.0]).unwrap();
+    let d = router.route([1.0]).unwrap();
     assert!(d.is_active(0));
     assert_eq!(d.firing_rates.len(), 1);
 }
@@ -149,7 +160,7 @@ fn custom_config_weights_applied() {
 #[test]
 fn backward_compat_ahl_router_still_works() {
     let mut router = crate::router::AhlRouter::new();
-    let d = router.route(&[1.0, 0.0, 0.0]).unwrap();
+    let d = router.route([1.0, 0.0, 0.0]).unwrap();
     assert!(d.is_active(0));
 }
 
@@ -163,7 +174,7 @@ fn route_accepts_array_by_value() {
 #[test]
 fn route_rejects_mismatched_length() {
     let mut router = ChannelRouter::new();
-    let result = router.route(&[1.0, 0.0]);
+    let result = router.route([1.0, 0.0]);
     assert!(result.is_err());
 }
 
@@ -174,22 +185,30 @@ fn route_error_context_reports_public_method_name() {
     // not "route_modulated signals" — because callers of `route()` never
     // invoked `route_modulated` and would be confused by that string.
     let mut router = ChannelRouter::new();
-    let err = router.route(&[1.0, 0.0]).unwrap_err();
+    let err = router.route([1.0, 0.0]).unwrap_err();
     let msg = format!("{err}");
-    assert!(msg.contains("route signals"),
-        "route() error must reference \"route signals\", got: {msg}");
-    assert!(!msg.contains("route_modulated"),
-        "route() error must NOT leak the internal method name, got: {msg}");
+    assert!(
+        msg.contains("route signals"),
+        "route() error must reference \"route signals\", got: {msg}"
+    );
+    assert!(
+        !msg.contains("route_modulated"),
+        "route() error must NOT leak the internal method name, got: {msg}"
+    );
 }
 
 #[test]
 fn route_modulated_error_context_reports_internal_method_name() {
     // Conversely, `route_modulated()` reports its own name in the error.
     let mut router = ChannelRouter::new();
-    let err = router.route_modulated(&[1.0, 0.0], &NeuromodState::balanced()).unwrap_err();
+    let err = router
+        .route_modulated([1.0, 0.0], &NeuromodState::balanced())
+        .unwrap_err();
     let msg = format!("{err}");
-    assert!(msg.contains("route_modulated signals"),
-        "route_modulated() error must reference \"route_modulated signals\", got: {msg}");
+    assert!(
+        msg.contains("route_modulated signals"),
+        "route_modulated() error must reference \"route_modulated signals\", got: {msg}"
+    );
 }
 
 #[test]
@@ -205,8 +224,8 @@ fn deserialized_router_with_empty_inner_baseline_weights_recovers() {
     // and confirm the router self-heals on the first modulated route instead
     // of panicking at `apply_plasticity`.
     let router = ChannelRouter::new();
-    let mut json: serde_json::Value = serde_json::to_value(&router)
-        .expect("Fresh router must serialize");
+    let mut json: serde_json::Value =
+        serde_json::to_value(&router).expect("Fresh router must serialize");
     // Force the malformed-payload case: outer length matches channel count (3)
     // but each row is empty.
     json["baseline_weights"] = serde_json::json!([[], [], []]);
@@ -216,10 +235,12 @@ fn deserialized_router_with_empty_inner_baseline_weights_recovers() {
 
     // The first modulated route must self-heal instead of panicking on
     // `apply_plasticity` indexing `baseline_weights[i][j]`.
-    let result = router.route_modulated(&[0.5, 0.0, 0.0], &NeuromodState::balanced());
-    assert!(result.is_ok(),
+    let result = router.route_modulated([0.5, 0.0, 0.0], &NeuromodState::balanced());
+    assert!(
+        result.is_ok(),
         "Malformed baseline_weights must self-heal on first route: {:?}",
-        result.err());
+        result.err()
+    );
 }
 
 #[test]
@@ -235,14 +256,14 @@ fn apply_feedback_on_deserialized_router_with_malformed_baseline_does_not_panic(
     // before any indexing happens. This test exercises the path *without* going
     // through `route_modulated` first.
     let router = ChannelRouter::new();
-    let mut json: serde_json::Value = serde_json::to_value(&router)
-        .expect("Fresh router must serialize");
+    let mut json: serde_json::Value =
+        serde_json::to_value(&router).expect("Fresh router must serialize");
     // Force the malformed-payload case: outer length matches channel count (3)
     // but each row is empty.
     json["baseline_weights"] = serde_json::json!([[], [], []]);
 
-    let mut router: ChannelRouter = serde_json::from_value(json)
-        .expect("Malformed-payload router should still deserialize");
+    let mut router: ChannelRouter =
+        serde_json::from_value(json).expect("Malformed-payload router should still deserialize");
 
     // `apply_feedback` must self-heal instead of panicking on
     // `baseline_weights[channel_idx][channel_idx]`.
@@ -270,18 +291,23 @@ fn zero_routing_timesteps_panics() {
 fn dopamine_increases_channel_conductance() {
     let mut router = ChannelRouter::new();
     // Baseline: weak signal should not activate.
-    let d1 = router.route(&[0.15, 0.0, 0.0]).unwrap();
+    let d1 = router.route([0.15, 0.0, 0.0]).unwrap();
     let baseline_active = d1.is_active(0);
 
     // With dopamine: same weak signal should have lower threshold.
-    let mods = NeuromodState { dopamine: 0.8, ..NeuromodState::default() };
-    let d2 = router.route_modulated(&[0.15, 0.0, 0.0], &mods).unwrap();
+    let mods = NeuromodState {
+        dopamine: 0.8,
+        ..NeuromodState::default()
+    };
+    let d2 = router.route_modulated([0.15, 0.0, 0.0], &mods).unwrap();
     // Dopamine makes it easier to fire, so if it wasn't active before,
     // it might be now. If it was active before, it should still be.
     if !baseline_active {
         // Dopamine should help weak signal cross threshold.
-        assert!(d2.is_active(0) || d2.firing_rates[0] > d1.firing_rates[0],
-            "Dopamine should increase conductance");
+        assert!(
+            d2.is_active(0) || d2.firing_rates[0] > d1.firing_rates[0],
+            "Dopamine should increase conductance"
+        );
     }
 }
 
@@ -289,30 +315,40 @@ fn dopamine_increases_channel_conductance() {
 fn cortisol_increases_channel_resistance() {
     let mut router = ChannelRouter::new();
     // Baseline: moderate signal should activate.
-    let d1 = router.route(&[0.5, 0.0, 0.0]).unwrap();
+    let d1 = router.route([0.5, 0.0, 0.0]).unwrap();
     let baseline_rate = d1.firing_rates[0];
 
     // With cortisol: same signal should have higher threshold.
-    let mods = NeuromodState { cortisol: 0.8, ..NeuromodState::default() };
-    let d2 = router.route_modulated(&[0.5, 0.0, 0.0], &mods).unwrap();
+    let mods = NeuromodState {
+        cortisol: 0.8,
+        ..NeuromodState::default()
+    };
+    let d2 = router.route_modulated([0.5, 0.0, 0.0], &mods).unwrap();
     // Cortisol should reduce firing rate.
-    assert!(d2.firing_rates[0] <= baseline_rate,
-        "Cortisol should increase resistance (reduce firing rate)");
+    assert!(
+        d2.firing_rates[0] <= baseline_rate,
+        "Cortisol should increase resistance (reduce firing rate)"
+    );
 }
 
 #[test]
 fn serotonin_increases_leak_reduces_persistence() {
     let mut router = ChannelRouter::new();
     // Baseline firing rate.
-    let d1 = router.route(&[0.8, 0.0, 0.0]).unwrap();
+    let d1 = router.route([0.8, 0.0, 0.0]).unwrap();
     let baseline_rate = d1.firing_rates[0];
 
     // With serotonin: higher leak should reduce firing.
-    let mods = NeuromodState { serotonin: 0.8, ..NeuromodState::default() };
-    let d2 = router.route_modulated(&[0.8, 0.0, 0.0], &mods).unwrap();
+    let mods = NeuromodState {
+        serotonin: 0.8,
+        ..NeuromodState::default()
+    };
+    let d2 = router.route_modulated([0.8, 0.0, 0.0], &mods).unwrap();
     // Serotonin should reduce firing rate due to higher leak.
-    assert!(d2.firing_rates[0] <= baseline_rate,
-        "Serotonin should increase leak (reduce persistence)");
+    assert!(
+        d2.firing_rates[0] <= baseline_rate,
+        "Serotonin should increase leak (reduce persistence)"
+    );
 }
 
 #[test]
@@ -325,13 +361,18 @@ fn active_channel_strengthens_with_dopamine() {
     let w_before = router.weight_matrix()[0][0];
 
     // Route with high dopamine — channel 0 should activate and strengthen.
-    let mods = NeuromodState { dopamine: 1.0, ..NeuromodState::default() };
-    let d = router.route_modulated(&[1.0, 0.0, 0.0], &mods).unwrap();
+    let mods = NeuromodState {
+        dopamine: 1.0,
+        ..NeuromodState::default()
+    };
+    let d = router.route_modulated([1.0, 0.0, 0.0], &mods).unwrap();
     assert!(d.is_active(0), "Channel 0 should be active");
 
     let w_after = router.weight_matrix()[0][0];
-    assert!(w_after > w_before,
-        "Active channel should strengthen with dopamine: {w_before} -> {w_after}");
+    assert!(
+        w_after > w_before,
+        "Active channel should strengthen with dopamine: {w_before} -> {w_after}"
+    );
 }
 
 #[test]
@@ -344,19 +385,24 @@ fn inactive_channel_weakens_over_time() {
     let mut router = ChannelRouter::with_config(config);
 
     // First activate channel 1 to strengthen it above baseline.
-    let _ = router.route(&[0.0, 1.0, 0.0]).unwrap();
+    let _ = router.route([0.0, 1.0, 0.0]).unwrap();
     let w_strengthened = router.weight_matrix()[1][1];
-    assert!(w_strengthened > 0.9, "Channel 1 should strengthen after activation");
+    assert!(
+        w_strengthened > 0.9,
+        "Channel 1 should strengthen after activation"
+    );
 
     // Now route multiple times with signal only on channel 0.
     // Channel 1 is inactive and should decay toward baseline.
     for _ in 0..10 {
-        let _ = router.route(&[1.0, 0.0, 0.0]).unwrap();
+        let _ = router.route([1.0, 0.0, 0.0]).unwrap();
     }
 
     let w_after = router.weight_matrix()[1][1];
-    assert!(w_after < w_strengthened,
-        "Inactive channel should weaken (use-it-or-lose-it): {w_strengthened} -> {w_after}");
+    assert!(
+        w_after < w_strengthened,
+        "Inactive channel should weaken (use-it-or-lose-it): {w_strengthened} -> {w_after}"
+    );
 }
 
 #[test]
@@ -365,26 +411,30 @@ fn fatigue_accumulates_with_use() {
     let fatigue_before = router.channel_fatigue[0];
 
     // Route with strong signal on channel 0.
-    let _ = router.route(&[1.0, 0.0, 0.0]).unwrap();
+    let _ = router.route([1.0, 0.0, 0.0]).unwrap();
 
     let fatigue_after = router.channel_fatigue[0];
-    assert!(fatigue_after > fatigue_before,
-        "Fatigue should accumulate with activation: {fatigue_before} -> {fatigue_after}");
+    assert!(
+        fatigue_after > fatigue_before,
+        "Fatigue should accumulate with activation: {fatigue_before} -> {fatigue_after}"
+    );
 }
 
 #[test]
 fn fatigue_recovery_when_inactive() {
     let mut router = ChannelRouter::new();
     // Activate channel 0.
-    let _ = router.route(&[1.0, 0.0, 0.0]).unwrap();
+    let _ = router.route([1.0, 0.0, 0.0]).unwrap();
     let fatigue_after_active = router.channel_fatigue[0];
     assert!(fatigue_after_active > 0.0);
 
     // Route with signal on channel 1 (channel 0 inactive).
-    let _ = router.route(&[0.0, 1.0, 0.0]).unwrap();
+    let _ = router.route([0.0, 1.0, 0.0]).unwrap();
     let fatigue_after_inactive = router.channel_fatigue[0];
-    assert!(fatigue_after_inactive < fatigue_after_active,
-        "Fatigue should recover when inactive: {fatigue_after_active} -> {fatigue_after_inactive}");
+    assert!(
+        fatigue_after_inactive < fatigue_after_active,
+        "Fatigue should recover when inactive: {fatigue_after_active} -> {fatigue_after_inactive}"
+    );
 }
 
 #[test]
@@ -392,22 +442,27 @@ fn cortisol_amplifies_fatigue_effect() {
     let mut router = ChannelRouter::new();
     // Build up some fatigue on channel 0.
     for _ in 0..3 {
-        let _ = router.route(&[1.0, 0.0, 0.0]).unwrap();
+        let _ = router.route([1.0, 0.0, 0.0]).unwrap();
     }
     let fatigue = router.channel_fatigue[0];
     assert!(fatigue > 0.0);
 
     // Baseline rate without cortisol.
-    let d1 = router.route(&[0.5, 0.0, 0.0]).unwrap();
+    let d1 = router.route([0.5, 0.0, 0.0]).unwrap();
     let rate_no_stress = d1.firing_rates[0];
 
     // With cortisol: fatigue should have stronger effect.
-    let mods = NeuromodState { cortisol: 1.0, ..NeuromodState::default() };
-    let d2 = router.route_modulated(&[0.5, 0.0, 0.0], &mods).unwrap();
+    let mods = NeuromodState {
+        cortisol: 1.0,
+        ..NeuromodState::default()
+    };
+    let d2 = router.route_modulated([0.5, 0.0, 0.0], &mods).unwrap();
     let rate_stressed = d2.firing_rates[0];
 
-    assert!(rate_stressed <= rate_no_stress,
-        "Cortisol should amplify fatigue effect: {rate_no_stress} -> {rate_stressed}");
+    assert!(
+        rate_stressed <= rate_no_stress,
+        "Cortisol should amplify fatigue effect: {rate_no_stress} -> {rate_stressed}"
+    );
 }
 
 #[test]
@@ -415,22 +470,27 @@ fn dopamine_counteracts_fatigue() {
     let mut router = ChannelRouter::new();
     // Build up fatigue on channel 0.
     for _ in 0..5 {
-        let _ = router.route(&[1.0, 0.0, 0.0]).unwrap();
+        let _ = router.route([1.0, 0.0, 0.0]).unwrap();
     }
     let fatigue = router.channel_fatigue[0];
     assert!(fatigue > 0.3, "Should have significant fatigue");
 
     // Baseline rate with fatigue.
-    let d1 = router.route(&[0.5, 0.0, 0.0]).unwrap();
+    let d1 = router.route([0.5, 0.0, 0.0]).unwrap();
     let rate_no_dopamine = d1.firing_rates[0];
 
     // With dopamine: should counteract fatigue.
-    let mods = NeuromodState { dopamine: 1.0, ..NeuromodState::default() };
-    let d2 = router.route_modulated(&[0.5, 0.0, 0.0], &mods).unwrap();
+    let mods = NeuromodState {
+        dopamine: 1.0,
+        ..NeuromodState::default()
+    };
+    let d2 = router.route_modulated([0.5, 0.0, 0.0], &mods).unwrap();
     let rate_dopamine = d2.firing_rates[0];
 
-    assert!(rate_dopamine >= rate_no_dopamine,
-        "Dopamine should counteract fatigue: {rate_no_dopamine} -> {rate_dopamine}");
+    assert!(
+        rate_dopamine >= rate_no_dopamine,
+        "Dopamine should counteract fatigue: {rate_no_dopamine} -> {rate_dopamine}"
+    );
 }
 
 #[test]
@@ -459,11 +519,16 @@ fn least_resistance_pathway_routing() {
     };
     let mut router = ChannelRouter::with_config(config);
 
-    let low_cortisol = NeuromodState { cortisol: 0.3, ..NeuromodState::default() };
+    let low_cortisol = NeuromodState {
+        cortisol: 0.3,
+        ..NeuromodState::default()
+    };
 
     // Baseline: fresh router, channel 0 fatigue = 0.
     // Effective threshold ≈ 0.25 * 1.15 = 0.2875. Stimulus = 0.18 → fire.
-    let d_baseline = router.route_modulated(&[0.3, 0.3, 0.3], &low_cortisol).unwrap();
+    let d_baseline = router
+        .route_modulated([0.3, 0.3, 0.3], &low_cortisol)
+        .unwrap();
     let rate_baseline = d_baseline.firing_rates[0];
 
     // Inject high fatigue on channel 0 directly. Weights are unchanged from
@@ -472,11 +537,15 @@ fn least_resistance_pathway_routing() {
     // Effective threshold ≈ 0.25 * 1.15 * 1.3 = 0.374. Stimulus = 0.18 < 0.374
     // → no firing.
     router.channel_fatigue[0] = 1.0;
-    let d_fatigued = router.route_modulated(&[0.3, 0.3, 0.3], &low_cortisol).unwrap();
+    let d_fatigued = router
+        .route_modulated([0.3, 0.3, 0.3], &low_cortisol)
+        .unwrap();
     let rate_fatigued = d_fatigued.firing_rates[0];
 
-    assert!(rate_fatigued < rate_baseline,
-        "Fatigued channel 0 should have lower firing rate: {rate_baseline} -> {rate_fatigued}");
+    assert!(
+        rate_fatigued < rate_baseline,
+        "Fatigued channel 0 should have lower firing rate: {rate_baseline} -> {rate_fatigued}"
+    );
 }
 
 #[test]
@@ -499,24 +568,31 @@ fn cortisol_increases_resistance_on_fresh_router() {
     // "brand-new router with zero fatigue" measurement.
     let mut calm_router = ChannelRouter::new();
     let mut stressed_router = ChannelRouter::new();
-    assert!(calm_router.channel_fatigue.iter().all(|&f| f == 0.0)
-        && stressed_router.channel_fatigue.iter().all(|&f| f == 0.0),
-        "Pre-condition: both fresh routers have zero fatigue on every channel");
+    assert!(
+        calm_router.channel_fatigue.iter().all(|&f| f == 0.0)
+            && stressed_router.channel_fatigue.iter().all(|&f| f == 0.0),
+        "Pre-condition: both fresh routers have zero fatigue on every channel"
+    );
 
     let d_calm = calm_router
-        .route_modulated(&[0.05, 0.0, 0.0], &NeuromodState::balanced())
+        .route_modulated([0.05, 0.0, 0.0], &NeuromodState::balanced())
         .unwrap();
     let rate_calm = d_calm.firing_rates[0];
 
-    let stressed = NeuromodState { cortisol: 1.0, ..NeuromodState::default() };
+    let stressed = NeuromodState {
+        cortisol: 1.0,
+        ..NeuromodState::default()
+    };
     let d_stressed = stressed_router
-        .route_modulated(&[0.05, 0.0, 0.0], &stressed)
+        .route_modulated([0.05, 0.0, 0.0], &stressed)
         .unwrap();
     let rate_stressed = d_stressed.firing_rates[0];
 
-    assert!(rate_stressed < rate_calm,
+    assert!(
+        rate_stressed < rate_calm,
         "Cortisol must raise the threshold on a fresh router: \
-         calm={rate_calm}, stressed={rate_stressed}");
+         calm={rate_calm}, stressed={rate_stressed}"
+    );
 }
 
 #[test]
@@ -560,13 +636,15 @@ fn plasticity_speed_tunes_adaptation_rate() {
     let mut slow = ChannelRouter::with_config(cfg_slow);
     let mut fast = ChannelRouter::with_config(cfg_fast);
 
-    let _ = slow.route(&[1.0, 0.0, 0.0]).unwrap();
-    let _ = fast.route(&[1.0, 0.0, 0.0]).unwrap();
+    let _ = slow.route([1.0, 0.0, 0.0]).unwrap();
+    let _ = fast.route([1.0, 0.0, 0.0]).unwrap();
 
     let w_slow = slow.weight_matrix()[0][0];
     let w_fast = fast.weight_matrix()[0][0];
 
-    assert!(w_fast > w_slow,
+    assert!(
+        w_fast > w_slow,
         "Faster plasticity_speed should produce a larger weight after one active route: \
-         slow={w_slow}, fast={w_fast}");
+         slow={w_slow}, fast={w_fast}"
+    );
 }

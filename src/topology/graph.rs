@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! [`SynapticGraph`] — adjacency structure with delay and polarity metadata.
 //!
 //! Extends the CSR sparse representation from `sparse.rs` with per-synapse
@@ -56,22 +58,11 @@ impl SynapticGraph {
     /// Build from a list of synapse descriptors.
     ///
     /// Descriptors need not be sorted; they will be grouped by source neuron.
-    pub fn from_descriptors(neuron_count: usize, descriptors: &[SynapseDescriptor]) -> Result<Self> {
-        // Validate indices
-        for desc in descriptors {
-            if desc.source as usize >= neuron_count {
-                return Err(MeshError::IndexOutOfBounds {
-                    index: desc.source as usize,
-                    max: neuron_count - 1,
-                });
-            }
-            if desc.target as usize >= neuron_count {
-                return Err(MeshError::IndexOutOfBounds {
-                    index: desc.target as usize,
-                    max: neuron_count - 1,
-                });
-            }
-        }
+    pub fn from_descriptors(
+        neuron_count: usize,
+        descriptors: &[SynapseDescriptor],
+    ) -> Result<Self> {
+        Self::validate_descriptor_indices(neuron_count, descriptors)?;
 
         // Count edges per source neuron
         let mut counts = vec![0usize; neuron_count];
@@ -94,7 +85,6 @@ impl SynapticGraph {
 
         // Place each descriptor at the right position
         let mut cursor = counts.clone();
-        // cursor[i] = how many edges for neuron i have been placed so far
         cursor.fill(0);
 
         for desc in descriptors {
@@ -115,6 +105,33 @@ impl SynapticGraph {
             delays,
             polarities,
         })
+    }
+
+    /// Validate that all descriptor source/target indices are within bounds.
+    fn validate_descriptor_indices(
+        neuron_count: usize,
+        descriptors: &[SynapseDescriptor],
+    ) -> Result<()> {
+        if neuron_count == 0 && !descriptors.is_empty() {
+            return Err(MeshError::InvalidConfig(
+                "descriptors provided for a graph with 0 neurons".into(),
+            ));
+        }
+        for desc in descriptors {
+            if desc.source as usize >= neuron_count {
+                return Err(MeshError::IndexOutOfBounds {
+                    index: desc.source as usize,
+                    max: neuron_count.saturating_sub(1),
+                });
+            }
+            if desc.target as usize >= neuron_count {
+                return Err(MeshError::IndexOutOfBounds {
+                    index: desc.target as usize,
+                    max: neuron_count.saturating_sub(1),
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Number of neurons in the graph.
@@ -144,7 +161,14 @@ impl SynapticGraph {
     ) -> impl Iterator<Item = (NeuronId, f32, DelayTicks, Polarity)> + '_ {
         let start = self.row_ptr[source];
         let end = self.row_ptr[source + 1];
-        (start..end).map(move |i| (self.targets[i], self.weights[i], self.delays[i], self.polarities[i]))
+        (start..end).map(move |i| {
+            (
+                self.targets[i],
+                self.weights[i],
+                self.delays[i],
+                self.polarities[i],
+            )
+        })
     }
 
     /// Get the out-degree of a neuron.
@@ -168,7 +192,7 @@ impl SynapticGraph {
     /// Raw access to CSR arrays for GPU upload.
     pub fn to_gpu_arrays(&self) -> (Vec<u32>, Vec<u32>, Vec<f32>, Vec<u16>) {
         let row_ptr: Vec<u32> = self.row_ptr.iter().map(|&x| x as u32).collect();
-        let targets: Vec<u32> = self.targets.iter().map(|&x| x).collect();
+        let targets: Vec<u32> = self.targets.to_vec();
         (row_ptr, targets, self.weights.clone(), self.delays.clone())
     }
 
@@ -244,7 +268,10 @@ mod tests {
 
         // Check inhibitory weight is negative
         let edges: Vec<_> = graph.outgoing(0).collect();
-        let inh_edge = edges.iter().find(|(_, _, _, p)| *p == Polarity::Inhibitory).unwrap();
+        let inh_edge = edges
+            .iter()
+            .find(|(_, _, _, p)| *p == Polarity::Inhibitory)
+            .unwrap();
         assert!(inh_edge.1 < 0.0);
     }
 
