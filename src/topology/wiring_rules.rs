@@ -62,6 +62,14 @@ pub fn assign_delays(
     speed: f32,
     max_delay: DelayTicks,
 ) {
+    // max_delay == 0 means all synapses deliver same-tick (delay = 0).
+    if max_delay == 0 {
+        for desc in descriptors.iter_mut() {
+            desc.delay = 0;
+        }
+        return;
+    }
+
     for desc in descriptors.iter_mut() {
         if let Some(pos) = positions {
             let src_pos = &pos[desc.source as usize];
