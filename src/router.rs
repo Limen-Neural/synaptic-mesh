@@ -426,9 +426,21 @@ impl ChannelRouter {
     /// downstream `apply_feedback` clamp would suddenly snap a weight.
     fn apply_plasticity(&mut self, active_channels: &[usize], mods: &NeuromodState) {
         let n = self.config.channel_count;
-        // Guard against malformed deserialized state where channel_count
-        // exceeds actual neuron vector length (same guard as apply_feedback).
-        if n > self.neurons.len() {
+        // Guard against malformed deserialized state: check both outer lengths
+        // AND inner row lengths of neurons and baseline_weights, matching the
+        // belt-and-suspenders pattern in sync_baseline_after_feedback.
+        debug_assert!(
+            self.neurons.len() >= n
+                && self.neurons.iter().all(|neu| neu.weights.len() >= n)
+                && self.baseline_weights.len() >= n
+                && self.baseline_weights.iter().all(|row| row.len() >= n),
+            "apply_plasticity invariant violation — ensure_neuromod_state_synced should have rebuilt"
+        );
+        if n > self.neurons.len()
+            || self.neurons.iter().any(|neu| neu.weights.len() < n)
+            || self.baseline_weights.len() < n
+            || self.baseline_weights.iter().any(|row| row.len() < n)
+        {
             return;
         }
         let decay = self.config.plasticity_decay;
