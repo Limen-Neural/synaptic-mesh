@@ -63,6 +63,15 @@ pub fn assign_delays(
     max_delay: DelayTicks,
 ) {
     // max_delay == 0 means all synapses deliver same-tick (delay = 0).
+    //
+    // Pre-PR behavior was inconsistent: the position-based path used
+    // `clamp(1, max_delay)` which would panic in debug mode (min > max),
+    // while the index-based path produced delay=1 via `% 1 = 0` then
+    // `.max(1) = 1`. This early return fixes both paths.
+    //
+    // Behavioral note: callers that previously relied on max_delay=0
+    // producing delay=1 will now get delay=0 (same-tick delivery).
+    // Currently assign_delays is only used in tests internally.
     if max_delay == 0 {
         for desc in descriptors.iter_mut() {
             desc.delay = 0;

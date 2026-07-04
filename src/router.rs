@@ -394,6 +394,14 @@ impl ChannelRouter {
         //    A deserialized neuron may have weights.len() != n (e.g.
         //    serialized with an older channel_count). Truncate or
         //    zero-pad each to exactly n.
+        //
+        //    Zero-padding gives new channels weight 0.0, which differs
+        //    from the constructor's self_weight/cross_weight pattern.
+        //    This degrades routing on new channels until weights are
+        //    explicitly set — acceptable as a self-heal path (the
+        //    alternative is a panic). Callers who need proper weights
+        //    after a channel_count change should reconstruct via
+        //    with_config rather than relying on this repair.
         let mut weights_repaired = false;
         for neu in &mut self.neurons {
             if neu.weights.len() != n {
