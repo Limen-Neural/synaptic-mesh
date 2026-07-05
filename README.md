@@ -18,7 +18,7 @@
 ## Core Capabilities
 
 - **Topology Generators** — Deterministic generation of Erdős–Rényi (random), Watts–Strogatz (small-world), Barabási–Albert (scale-free), and Layered feed-forward topologies.
-- **Temporal Propation** — Per-synapse axonal delays stored alongside weights. Spikes are delivered at the correct future tick via a high-performance ring-buffer queue.
+- **Temporal Propagation** — Per-synapse axonal delays stored alongside weights. Spikes are delivered at the correct future tick via a high-performance ring-buffer queue.
 - **Biologically Inspired Wiring** — Support for Dale's Law (fixed neuron polarity) and position-based distance-dependent connectivity.
 - **Sparse Synaptic Map (CSR)** — Compressed Sparse Row format for memory-efficient weight storage (20× reduction for sparse networks).
 - **Generic Channel Router** — A configurable multi-channel SNN router using neuromodulatory neurons for sparse signal classification.
