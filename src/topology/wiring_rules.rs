@@ -51,7 +51,6 @@ pub fn apply_dale_polarity(
 ///
 /// # Arguments
 ///
-/// * `n` — neuron count
 /// * `descriptors` — synapse descriptors to update
 /// * `positions` — optional 3D positions per neuron
 /// * `speed` — propagation speed (distance units per tick)
@@ -71,7 +70,6 @@ pub fn assign_delays(
     //
     // Behavioral note: callers that previously relied on max_delay=0
     // producing delay=1 will now get delay=0 (same-tick delivery).
-    // Currently assign_delays is only used in tests internally.
     if max_delay == 0 {
         for desc in descriptors.iter_mut() {
             desc.delay = 0;
