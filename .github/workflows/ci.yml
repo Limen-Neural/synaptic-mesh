@@ -47,5 +47,10 @@ jobs:
       - name: Build
         run: cargo build --locked --all-features
 
+      - name: Documentation
+        run: cargo doc --locked --all-features --no-deps --document-private-items
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+
       - name: Test
         run: cargo test --locked --all-features
