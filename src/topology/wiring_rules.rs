@@ -69,10 +69,11 @@ pub fn assign_delays(
     // Historically, the position-based path used `clamp(1, max_delay)`
     // which would panic in debug mode (min > max), while the index-based
     // path produced delay=1 via `% 1 = 0` then `.max(1) = 1`. The early
-    // return below makes both paths consistent when max_delay == 0.
+    // return below (predating this PR) makes both paths consistent when
+    // max_delay == 0.
     //
-    // Behavioral note: callers that previously relied on max_delay=0
-    // producing delay=1 will now get delay=0 (same-tick delivery).
+    // Callers that previously relied on max_delay=0 producing delay=1
+    // should update to expect delay=0 (same-tick delivery).
     if max_delay == 0 {
         for desc in descriptors.iter_mut() {
             desc.delay = 0;
