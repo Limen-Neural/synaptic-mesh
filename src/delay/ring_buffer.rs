@@ -23,9 +23,9 @@ use serde::{Deserialize, Serialize};
 /// Ring-buffer delay queue for spike delivery.
 ///
 /// At each simulation tick:
-/// 1. Call [`inject`] for each spiking synapse to schedule future delivery.
-/// 2. Call [`drain_current_tick`] to collect all currents that have arrived.
-/// 3. Call [`advance`] to move the tick forward.
+/// 1. Call [`SpikeDelayBuffer::inject`] for each spiking synapse to schedule future delivery.
+/// 2. Call [`SpikeDelayBuffer::drain_current_tick`] to collect all currents that have arrived.
+/// 3. Call [`SpikeDelayBuffer::advance`] to move the tick forward.
 ///
 /// The buffer is zero-cost when `max_delay == 0` (all spikes delivered
 /// in the same tick they are injected, same as the existing AHL router behaviour).

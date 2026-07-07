@@ -1,2 +1,12 @@
 /target
 /AGENTS.md
+
+# IDE / Editor
+.idea/
+.vscode/
+.cursor/
+.codex/
+.kilo/
+
+# Agent tools
+.mimocode/

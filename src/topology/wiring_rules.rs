@@ -46,12 +46,14 @@ pub fn apply_dale_polarity(
 /// If the graph has position data, delay is proportional to Euclidean distance:
 ///   `delay = clamp(round(distance / speed), 1, max_delay)`
 ///
+/// When `max_delay == 0`, all delays are set to 0 (same-tick delivery),
+/// matching the `SpikeDelayBuffer` zero-cost behavior.
+///
 /// If no positions are available, delay is assigned deterministically from
 /// source/target indices.
 ///
 /// # Arguments
 ///
-/// * `n` — neuron count
 /// * `descriptors` — synapse descriptors to update
 /// * `positions` — optional 3D positions per neuron
 /// * `speed` — propagation speed (distance units per tick)
@@ -63,6 +65,15 @@ pub fn assign_delays(
     max_delay: DelayTicks,
 ) {
     // max_delay == 0 means all synapses deliver same-tick (delay = 0).
+    //
+    // Historically, the position-based path used `clamp(1, max_delay)`
+    // which would panic in debug mode (min > max), while the index-based
+    // path produced delay=1 via `% 1 = 0` then `.max(1) = 1`. The early
+    // return below (predating this PR) makes both paths consistent when
+    // max_delay == 0.
+    //
+    // Callers that previously relied on max_delay=0 producing delay=1
+    // should update to expect delay=0 (same-tick delivery).
     if max_delay == 0 {
         for desc in descriptors.iter_mut() {
             desc.delay = 0;

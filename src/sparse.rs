@@ -316,7 +316,7 @@ impl NeuronStateSnapshot {
 
     /// Get a routing bonus for a neuron based on low quantization error.
     ///
-    /// Deprecated: use [`error_bonus`] instead.
+    /// Deprecated: use [`NeuronStateSnapshot::error_bonus`] instead.
     #[deprecated(since = "0.2.0", note = "use error_bonus instead")]
     pub fn quant_bonus(&self, neuron: usize, beta: f32) -> f32 {
         self.error_bonus(neuron, beta)
@@ -324,7 +324,7 @@ impl NeuronStateSnapshot {
 
     /// Get the estimated quantization error per neuron.
     ///
-    /// Deprecated: use the [`error`] field directly.
+    /// Deprecated: use the [`NeuronStateSnapshot::error`] field directly.
     #[deprecated(since = "0.2.0", note = "use error field instead")]
     pub fn quant_error(&self) -> &[f32] {
         &self.error

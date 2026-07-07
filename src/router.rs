@@ -168,7 +168,7 @@ impl RoutingDecision {
 /// a sparse activation mask. The number of channels is configurable at
 /// construction time via [`RouterConfig`].
 ///
-/// Supports adaptive neuromodulatory routing via [`route_modulated`]:
+/// Supports adaptive neuromodulatory routing via [`ChannelRouter::route_modulated`]:
 /// - Channels strengthen with use (dopamine-gated potentiation)
 /// - Channels weaken when idle (use-it-or-lose-it decay)
 /// - Fatigue accumulates with activation, cortisol amplifies it
@@ -243,7 +243,7 @@ impl ChannelRouter {
     ///
     /// `signals` must have length equal to `config.channel_count`.
     ///
-    /// Backward-compatible thin wrapper around [`route_modulated`]. The error
+    /// Backward-compatible thin wrapper around [`ChannelRouter::route_modulated`]. The error
     /// context reported on a signal-length mismatch is `"route signals"`,
     /// matching the original pre-neuromodulation API — callers using this
     /// public method see the same error message they did before, even though
@@ -394,6 +394,14 @@ impl ChannelRouter {
         //    A deserialized neuron may have weights.len() != n (e.g.
         //    serialized with an older channel_count). Truncate or
         //    zero-pad each to exactly n.
+        //
+        //    Zero-padding gives new channels weight 0.0, which differs
+        //    from the constructor's self_weight/cross_weight pattern.
+        //    This degrades routing on new channels until weights are
+        //    explicitly set — acceptable as a self-heal path (the
+        //    alternative is a panic). Callers who need proper weights
+        //    after a channel_count change should reconstruct via
+        //    with_config rather than relying on this repair.
         let mut weights_repaired = false;
         for neu in &mut self.neurons {
             if neu.weights.len() != n {
