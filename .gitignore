@@ -5,8 +5,14 @@
 .idea/
 .vscode/
 .cursor/
-.codex/
-.kilo/
+.zed/
+.antigravity/
+.kiro/
 
 # Agent tools
 .mimocode/
+.codex/
+.kilo/
+.air/
+.opencode/
+.cline/
