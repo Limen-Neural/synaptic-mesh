@@ -16,3 +16,6 @@
 .air/
 .opencode/
 .cline/
+
+# Isolated Git Worktrees
+.worktrees/
