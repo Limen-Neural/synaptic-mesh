@@ -107,6 +107,17 @@ let decision = router.route(&[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]);
 - **Neuron State Snapshots** — Per-neuron adaptation and error tracking for dynamic routing decisions.
 - **Routing Policies** — Configurable scoring equations that balance spike activity, adaptation penalties, and error bonuses.
 
+## Crate Boundary
+
+`synaptic-mesh` does **not** depend on the separate [`neuromod`](https://github.com/Limen-Neural/neuromod) crate. The two crates are kept independent so each can evolve without coupling:
+
+| Crate | Owns |
+|-------|------|
+| **neuromod** | Canonical neuron models — LIF, Izhikevich, Hodgkin-Huxley, GIF, FitzHugh-Nagumo, Lapicque |
+| **synaptic-mesh** | Topology, wiring, delay infrastructure, CSR sparse maps, `ChannelRouter`, and its router-internal `NeuromodNeuron` (NIF) integration primitive |
+
+`NeuromodNeuron` lives in [`router`](src/router.rs) — it's a router-internal integration primitive, not a general-purpose neuron model.
+
 ## Architecture
 
 ```text

@@ -13,8 +13,17 @@
 //! | [`delay`] | Temporal delay infrastructure — ring-buffer spike queues for tick-aligned delivery with configurable axonal propagation delays |
 //! | [`mesh`] | [`SynapticMesh`] orchestrator — the top-level struct owning topology + delays, provides `propagate()` for spike → current conversion |
 //! | [`sparse`] | Compressed Sparse Row (CSR) synaptic maps for GPU-optimized weight matrices |
-//! | [`router`] | Generic multi-channel SNN router using neuromodulatory neurons |
-//! | [`neuromod`] | Neuromodulatory (NIF) neuron model with gain control |
+//! | [`router`] | Generic multi-channel SNN router using [`NeuromodNeuron`], a router-internal NIF integration primitive |
+//!
+//! ## Crate boundary
+//!
+//! `synaptic-mesh` does **not** depend on the separate `neuromod` crate. The
+//! two crates are kept independent so each can evolve without coupling:
+//!
+//! | Crate | Owns |
+//! |-------|------|
+//! | **neuromod** | Canonical neuron models — LIF, Izhikevich, Hodgkin-Huxley, GIF, FitzHugh-Nagumo, Lapicque |
+//! | **synaptic-mesh** | Topology, wiring, delay infrastructure, CSR sparse maps, [`router::ChannelRouter`], and its router-internal [`NeuromodNeuron`] integration primitive |
 //!
 //! ## Quick start
 //!
@@ -90,7 +99,6 @@
 pub mod delay;
 pub mod error;
 pub mod mesh;
-pub mod neuromod;
 pub mod topology;
 pub mod types;
 
@@ -109,10 +117,8 @@ pub use types::{
     ConnectionModel, DelayModel, DelayTicks, NeuronId, Polarity, SynapseDescriptor, TopologyConfig,
 };
 
-pub use neuromod::NeuromodNeuron;
-
-// Generic router exports
-pub use router::{ChannelRouter, NeuromodState, RouterConfig, RoutingDecision};
+// Generic router exports (NeuromodNeuron is a router-internal NIF primitive; see "Crate boundary" above)
+pub use router::{ChannelRouter, NeuromodNeuron, NeuromodState, RouterConfig, RoutingDecision};
 
 // Backward-compatible router exports (deprecated)
 pub use router::{AHL_NUM_CHANNELS, AhlRouter};

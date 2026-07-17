@@ -29,10 +29,10 @@ After any "security" or dependency PR, confirm core product APIs still exist:
 ```bash
 # Check for key structs and modules
 rg -n 'pub struct SynapticMesh' src/mesh.rs
-rg -n 'pub struct NeuromodNeuron' src/neuromod.rs
+rg -n 'pub struct NeuromodNeuron' src/router.rs
 rg -n 'pub struct SynapticGraph' src/topology/graph.rs
 rg -n 'pub mod topology' src/lib.rs
-rg -n 'pub mod neuromod' src/lib.rs
+rg -n 'NeuromodNeuron' src/lib.rs   # confirms re-export from router (not a removed `neuromod` module)
 ```
 
 ## Diff hygiene
@@ -58,7 +58,7 @@ git check-ignore -v .worktrees .idea target
 
 ## Do not merge if
 
-- `src/mesh.rs` or `src/neuromod.rs` are unexpectedly altered or removed.
+- `src/mesh.rs` or `src/router.rs` are unexpectedly altered or removed.
 - `git diff origin/main` shows unexpected public-API removals.
 
 ## Pass criteria

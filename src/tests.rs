@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use crate::neuromod::NeuromodNeuron;
-use crate::router::{ChannelRouter, NeuromodState, RouterConfig};
+use crate::router::{ChannelRouter, NeuromodNeuron, NeuromodState, RouterConfig};
 
 #[test]
 fn channel_0_pulse_activates_channel_0() {
