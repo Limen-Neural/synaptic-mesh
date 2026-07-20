@@ -32,7 +32,7 @@ rg -n 'pub struct SynapticMesh' src/mesh.rs
 rg -n 'pub struct NeuromodNeuron' src/router.rs
 rg -n 'pub struct SynapticGraph' src/topology/graph.rs
 rg -n 'pub mod topology' src/lib.rs
-rg -n 'NeuromodNeuron' src/lib.rs   # confirms re-export from router (not a removed `neuromod` module)
+rg -n 'pub use router::\{[^}]*NeuromodNeuron' src/lib.rs   # confirms the router re-export (not a removed `neuromod` module)
 ```
 
 ## Diff hygiene

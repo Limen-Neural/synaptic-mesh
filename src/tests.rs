@@ -243,6 +243,30 @@ fn deserialized_router_with_empty_inner_baseline_weights_recovers() {
 }
 
 #[test]
+fn deserialized_router_with_missing_neuron_fields_recovers() {
+    // Regression test: older or hand-authored payloads may omit fields from a
+    // NeuromodNeuron. Deserialization must use the neuron's defaults so the
+    // router's existing lazy state repair can run on the first route.
+    let router = ChannelRouter::new();
+    let mut json: serde_json::Value =
+        serde_json::to_value(&router).expect("Fresh router must serialize");
+    json["neurons"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("weights");
+
+    let mut router: ChannelRouter = serde_json::from_value(json)
+        .expect("Missing neuron fields should deserialize using defaults");
+
+    let result = router.route_modulated([0.5, 0.0, 0.0], &NeuromodState::balanced());
+    assert!(
+        result.is_ok(),
+        "Router with missing neuron fields must self-heal on first route: {:?}",
+        result.err()
+    );
+}
+
+#[test]
 fn apply_feedback_on_deserialized_router_with_malformed_baseline_does_not_panic() {
     // Regression test for chatgpt-codex P2 thread #NyuBl / devin-ai BUG #NytR0.
     // Calling `apply_feedback` on a deserialized router whose `baseline_weights`

@@ -16,6 +16,8 @@
 .air/
 .opencode/
 .cline/
+.ai/
+.junie/
 
 # Isolated Git Worktrees
 .worktrees/

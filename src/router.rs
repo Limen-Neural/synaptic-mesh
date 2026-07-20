@@ -31,6 +31,7 @@ const MIN_FIRE_RATE: f32 = 0.1875;
 /// $V_{t+1} = V_t + (G \cdot I_{syn}) - \lambda(V_t - V_{rest})$
 /// where $G$ is the modulation gain and $\lambda$ is the leak rate.
 #[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(default)]
 pub struct NeuromodNeuron {
     /// Current membrane potential.
     pub v: f32,
