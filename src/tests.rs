@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use crate::neuromod::NeuromodNeuron;
-use crate::router::{ChannelRouter, NeuromodState, RouterConfig};
+use crate::router::{ChannelRouter, NeuromodNeuron, NeuromodState, RouterConfig};
 
 #[test]
 fn channel_0_pulse_activates_channel_0() {
@@ -239,6 +238,30 @@ fn deserialized_router_with_empty_inner_baseline_weights_recovers() {
     assert!(
         result.is_ok(),
         "Malformed baseline_weights must self-heal on first route: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn deserialized_router_with_missing_neuron_fields_recovers() {
+    // Regression test: older or hand-authored payloads may omit fields from a
+    // NeuromodNeuron. Deserialization must use the neuron's defaults so the
+    // router's existing lazy state repair can run on the first route.
+    let router = ChannelRouter::new();
+    let mut json: serde_json::Value =
+        serde_json::to_value(&router).expect("Fresh router must serialize");
+    json["neurons"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("weights");
+
+    let mut router: ChannelRouter = serde_json::from_value(json)
+        .expect("Missing neuron fields should deserialize using defaults");
+
+    let result = router.route_modulated([0.5, 0.0, 0.0], &NeuromodState::balanced());
+    assert!(
+        result.is_ok(),
+        "Router with missing neuron fields must self-heal on first route: {:?}",
         result.err()
     );
 }
