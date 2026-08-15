@@ -120,16 +120,10 @@ pub use types::{
 // Generic router exports (NeuromodNeuron is a router-internal NIF primitive; see "Crate boundary" above)
 pub use router::{ChannelRouter, NeuromodNeuron, NeuromodState, RouterConfig, RoutingDecision};
 
-// Backward-compatible router exports (deprecated)
-pub use router::{AHL_NUM_CHANNELS, AhlRouter};
-
 // Sparse map exports
 pub use sparse::{
     NeuronStateSnapshot, RoutingPolicy, SparseSynapticMap, SparseSynapticMapBuilder, Synapse,
 };
-
-// Backward-compatible sparse exports (deprecated)
-pub use sparse::TelemetrySnapshot;
 
 #[cfg(test)]
 mod tests;

@@ -1,5 +1,6 @@
 [package]
 name = "synaptic-mesh"
+version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "An SNN based mesh for managing the wiring, topology, and temporal delays between neurons."

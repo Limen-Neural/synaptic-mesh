@@ -11,9 +11,6 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Number of input channels for the default 3-channel router (backward compatible).
-pub const AHL_NUM_CHANNELS: usize = 3;
-
 /// Integration timesteps per routing decision (more → more stable).
 const ROUTING_TIMESTEPS: usize = 16;
 
@@ -267,11 +264,6 @@ pub struct ChannelRouter {
     #[serde(default)]
     baseline_weights: Vec<Vec<f32>>,
 }
-
-/// Backward-compatible alias for the default 3-channel router.
-///
-/// Deprecated: use [`ChannelRouter`] with [`RouterConfig::default()`] instead.
-pub type AhlRouter = ChannelRouter;
 
 impl Default for ChannelRouter {
     fn default() -> Self {

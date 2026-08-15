@@ -157,13 +157,6 @@ fn custom_config_weights_applied() {
 }
 
 #[test]
-fn backward_compat_ahl_router_still_works() {
-    let mut router = crate::router::AhlRouter::new();
-    let d = router.route([1.0, 0.0, 0.0]).unwrap();
-    assert!(d.is_active(0));
-}
-
-#[test]
 fn route_accepts_array_by_value() {
     let mut router = ChannelRouter::new();
     let d = router.route([1.0, 0.0, 0.0]).unwrap();
