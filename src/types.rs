@@ -47,7 +47,7 @@ impl Polarity {
 // ── Synapse descriptor ────────────────────────────────────────────────────────
 
 /// A fully-described synaptic connection with weight, delay, and polarity.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct SynapseDescriptor {
     /// Source neuron.
     pub source: NeuronId,

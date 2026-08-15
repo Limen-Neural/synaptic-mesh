@@ -25,7 +25,7 @@ use crate::types::{DelayTicks, NeuronId, Polarity, SynapseDescriptor};
 /// delays:     [2, 5, 1, ...]            — axonal delay in ticks
 /// polarities: [Exc, Inh, Exc, ...]      — Dale's law polarity
 /// ```
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SynapticGraph {
     /// Number of neurons in the graph.
     neuron_count: usize,
@@ -273,6 +273,39 @@ mod tests {
             .find(|(_, _, _, p)| *p == Polarity::Inhibitory)
             .unwrap();
         assert!(inh_edge.1 < 0.0);
+    }
+
+    #[test]
+    fn synaptic_graph_json_roundtrip() {
+        let descs = vec![
+            SynapseDescriptor {
+                source: 0,
+                target: 1,
+                weight: 0.9,
+                delay: 3,
+                polarity: Polarity::Excitatory,
+            },
+            SynapseDescriptor {
+                source: 0,
+                target: 2,
+                weight: 0.15,
+                delay: 1,
+                polarity: Polarity::Inhibitory,
+            },
+            SynapseDescriptor {
+                source: 2,
+                target: 1,
+                weight: 0.4,
+                delay: 5,
+                polarity: Polarity::Excitatory,
+            },
+        ];
+        let graph = SynapticGraph::from_descriptors(3, &descs)
+            .expect("hand-written descriptors must build a graph");
+        let json = serde_json::to_string(&graph).expect("serialize SynapticGraph to JSON");
+        let restored: SynapticGraph =
+            serde_json::from_str(&json).expect("deserialize SynapticGraph from JSON");
+        assert_eq!(restored, graph);
     }
 
     #[test]
