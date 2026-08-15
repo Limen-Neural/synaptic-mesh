@@ -24,7 +24,7 @@
 
 ## Installation
 
-Not yet on crates.io. First publish is planned as **0.2.0**. Until then, depend on git:
+Not yet on crates.io. Until a crates.io release is available, depend on git:
 
 ```toml
 synaptic-mesh = { git = "https://github.com/Limen-Neural/synaptic-mesh" }

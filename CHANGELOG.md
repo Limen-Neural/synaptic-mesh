@@ -68,3 +68,6 @@ First versioned history. Nothing before this tag was published or tagged.
 - Resolved clippy warnings (`RangeInclusive::contains`, iterator idioms,
   derivable impls, redundant borrows).
 - Fixed `cargo fmt` formatting (module ordering, debug_assert wrapping).
+
+[Unreleased]: https://github.com/Limen-Neural/synaptic-mesh/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Limen-Neural/synaptic-mesh/releases/tag/v0.1.0
