@@ -14,8 +14,8 @@ This file contains workflow and orientation notes for AI agents working on this 
 - `src/delay/`: temporal delay infrastructure
   - `ring_buffer.rs`: `SpikeDelayBuffer` — ring-buffer delay queue for tick-aligned spike delivery
 - `src/mesh.rs`: `SynapticMesh` — top-level orchestrator owning graph + delays, provides `propagate()` 
-- `src/router.rs`: `ChannelRouter` — generic multi-channel SNN router (configurable channel count); `AhlRouter` is a backward-compatible type alias
-- `src/sparse.rs`: `SparseSynapticMap` CSR format, `NeuronStateSnapshot`, `RoutingPolicy`; `TelemetrySnapshot` is a backward-compatible type alias
+- `src/router.rs`: `ChannelRouter` — generic multi-channel SNN router (configurable channel count)
+- `src/sparse.rs`: `SparseSynapticMap` CSR format, `NeuronStateSnapshot`, `RoutingPolicy`
 - `src/tests.rs`: test suite for router + sparse modules
 
 ## Entry Order
@@ -31,7 +31,7 @@ This file contains workflow and orientation notes for AI agents working on this 
 - **Determinism**: all generators use index-based pseudo-random hashing (golden-ratio fractional), no external RNG. Same inputs always produce the same topology.
 - **Dale's Law**: neuron polarity is per-neuron (all outgoing synapses share polarity). First `inh_fraction × N` neurons are inhibitory.
 - **Temporal Delays**: per-synapse axonal delays stored in CSR alongside weights. Ring-buffer delivers spikes at correct future tick.
-- **Backward Compatibility**: existing `AhlRouter`, `SparseSynapticMap`, `TelemetrySnapshot`, `RoutingPolicy` all preserved.
+- **Public API**: `ChannelRouter` + `RouterConfig` is the router surface. Deprecated aliases (`AhlRouter`, `AHL_NUM_CHANNELS`, `TelemetrySnapshot`, `quant_bonus`, `quant_error`) were removed in 0.1.0.
 
 ## Workflow Policy
 
@@ -41,7 +41,7 @@ This file contains workflow and orientation notes for AI agents working on this 
 
 ## Repository Context
 
-- **Repo**: `Limen-Neural/synapse-router`
+- **Repo**: `Limen-Neural/synaptic-mesh`
 - **Main branch**: `main`
 - **Language**: Rust (edition 2024)
 - **Key concepts**: SNN wiring, topology generation, axonal delays, CSR sparse maps, Dale's law

@@ -6,8 +6,7 @@
 <p align="center">SNN wiring, topology generation, and temporal delay infrastructure</p>
 
 <p align="center">
- <img src="https://img.shields.io/crates/v/synaptic-mesh" alt="crates.io"></a>
-  <a href="https://docs.rs/synaptic-mesh"><img src="https://docs.rs/synaptic-mesh/badge.svg" alt="docs.rs"></a>
+  <img src="https://img.shields.io/badge/version-0.1.0-informational" alt="0.1.0 (not yet on crates.io)">
   <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="MIT OR Apache-2.0">
 </p>
 
@@ -25,9 +24,13 @@
 
 ## Installation
 
+Not yet on crates.io. Until a crates.io release is available, depend on git:
+
 ```toml
-synaptic-mesh = "0.2"
+synaptic-mesh = { git = "https://github.com/Limen-Neural/synaptic-mesh" }
 ```
+
+After the `v0.1.0` tag exists you can pin it with `tag = "v0.1.0"`.
 
 ## Quick Start: Building a Mesh
 

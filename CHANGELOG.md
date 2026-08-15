@@ -7,27 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
+## [0.1.0] - 2026-08-14
 
-- **License**: Switched from `GPL-3.0-or-later` to dual `MIT OR Apache-2.0`.
-  This aligns `synaptic-mesh` with the rest of the Limen-Neural SNN stack and
-  permits broader downstream use. Old `LICENSE` (GPL-3.0) removed; replaced by
-  `LICENSE-MIT` and `LICENSE-APACHE-2.0`. SPDX identifier
-  `MIT OR Apache-2.0` added to all source files.
-- **BREAKING** — `apply_dale_polarity` (`topology::wiring_rules`) now returns
-  `Result<Vec<Polarity>, MeshError>` instead of `Vec<Polarity>`. Out-of-range
-  `inhibitory_fraction` values (< 0 or > 1) are now rejected with
-  `MeshError::InvalidConfig` instead of being silently clamped. All internal
-  callers updated; downstream crates must handle the new `Result` wrapper.
+First versioned history. Nothing before this tag was published or tagged.
 
 ### Added
 
+- Neuromodulatory adaptation in `ChannelRouter` — `NeuromodState` (cortisol,
+  dopamine, serotonin), `route_modulated()`, `apply_plasticity()`, per-channel
+  fatigue, use-it-or-lose-it plasticity.
+- Generic `ChannelRouter` with configurable channel count.
+- CSR sparse synaptic maps, topology generators (small-world, scale-free,
+  random, layered), temporal delay ring-buffer, Dale's law wiring.
 - **CI**: GitHub Actions workflow (`.github/workflows/ci.yml`) running
   `cargo fmt --check`, `cargo clippy -D warnings`, `cargo build`, and
   `cargo test` on every push/PR to `main`.
 - `inhibitory_fraction` range validation to all topology generators
   (`generate_random`, `generate_small_world`, `generate_scale_free`,
   `generate_layered`) — rejects values outside `[0, 1]`.
+
+### Changed
+
+- **License**: Dual `MIT OR Apache-2.0`. SPDX identifier added to all source
+  files.
+- `apply_dale_polarity` (`topology::wiring_rules`) returns
+  `Result<Vec<Polarity>, MeshError>` instead of `Vec<Polarity>`. Out-of-range
+  `inhibitory_fraction` values (< 0 or > 1) are rejected with
+  `MeshError::InvalidConfig`.
+
+### Removed
+
+- **`AhlRouter`** — use `ChannelRouter` with `RouterConfig::default()`.
+- **`AHL_NUM_CHANNELS`** — default channel count is `RouterConfig::default().channel_count` (3).
+- **`TelemetrySnapshot`** — use `NeuronStateSnapshot`.
+- **`NeuronStateSnapshot::quant_bonus`** — use `NeuronStateSnapshot::error_bonus`.
+- **`NeuronStateSnapshot::quant_error`** — use the `error` field.
+  The serde `alias = "quant_error"` on `error` is kept so older snapshots
+  still deserialize.
 
 ### Fixed
 
@@ -49,17 +65,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
-- Resolved ~40 clippy warnings (`RangeInclusive::contains`, iterator idioms,
+- Resolved clippy warnings (`RangeInclusive::contains`, iterator idioms,
   derivable impls, redundant borrows).
 - Fixed `cargo fmt` formatting (module ordering, debug_assert wrapping).
 
-## [0.2.0] - 2026-05-28
-
-### Features Added
-
-- Neuromodulatory adaptation in `ChannelRouter` — `NeuromodState` (cortisol,
-  dopamine, serotonin), `route_modulated()`, `apply_plasticity()`, per-channel
-  fatigue, use-it-or-lose-it plasticity (PR #8).
-- Generic `ChannelRouter` replacing domain-specific `AhlRouter` (PR #7).
-- CSR sparse synaptic maps, topology generators (small-world, scale-free,
-  random, layered), temporal delay ring-buffer, Dale's law wiring.
+[Unreleased]: https://github.com/Limen-Neural/synaptic-mesh/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Limen-Neural/synaptic-mesh/releases/tag/v0.1.0

@@ -286,11 +286,6 @@ pub struct NeuronStateSnapshot {
     pub step: u64,
 }
 
-/// Backward-compatible alias for [`NeuronStateSnapshot`].
-///
-/// Deprecated: use [`NeuronStateSnapshot`] instead.
-pub type TelemetrySnapshot = NeuronStateSnapshot;
-
 impl NeuronStateSnapshot {
     pub fn new(num_neurons: usize) -> Self {
         Self {
@@ -312,22 +307,6 @@ impl NeuronStateSnapshot {
     pub fn error_bonus(&self, neuron: usize, beta: f32) -> f32 {
         let err = self.error.get(neuron).copied().unwrap_or(0.0);
         beta * (1.0 - err.min(1.0))
-    }
-
-    /// Get a routing bonus for a neuron based on low quantization error.
-    ///
-    /// Deprecated: use [`NeuronStateSnapshot::error_bonus`] instead.
-    #[deprecated(since = "0.2.0", note = "use error_bonus instead")]
-    pub fn quant_bonus(&self, neuron: usize, beta: f32) -> f32 {
-        self.error_bonus(neuron, beta)
-    }
-
-    /// Get the estimated quantization error per neuron.
-    ///
-    /// Deprecated: use the [`NeuronStateSnapshot::error`] field directly.
-    #[deprecated(since = "0.2.0", note = "use error field instead")]
-    pub fn quant_error(&self) -> &[f32] {
-        &self.error
     }
 }
 
