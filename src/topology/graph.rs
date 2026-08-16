@@ -6,6 +6,7 @@
 //! axonal delay and polarity information. This is the core "wiring diagram"
 //! that the `SynapticMesh` orchestrator uses for spike propagation.
 
+use serde::de::{Deserializer, Error as DeError};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{MeshError, Result};
@@ -25,7 +26,7 @@ use crate::types::{DelayTicks, NeuronId, Polarity, SynapseDescriptor};
 /// delays:     [2, 5, 1, ...]            — axonal delay in ticks
 /// polarities: [Exc, Inh, Exc, ...]      — Dale's law polarity
 /// ```
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct SynapticGraph {
     /// Number of neurons in the graph.
     neuron_count: usize,
@@ -40,6 +41,68 @@ pub struct SynapticGraph {
     delays: Vec<DelayTicks>,
     /// Polarity per synapse.
     polarities: Vec<Polarity>,
+}
+
+impl<'de> Deserialize<'de> for SynapticGraph {
+    /// Deserializes and re-validates the CSR invariants that
+    /// [`SynapticGraph::from_descriptors`] enforces at construction time,
+    /// since a derived `Deserialize` would accept arbitrary field values
+    /// (mismatched `row_ptr` length, non-monotonic offsets, out-of-range
+    /// targets) that later panic in [`SynapticGraph::outgoing`] or
+    /// [`SynapticGraph::out_degree`].
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct RawSynapticGraph {
+            neuron_count: usize,
+            row_ptr: Vec<usize>,
+            targets: Vec<NeuronId>,
+            weights: Vec<f32>,
+            delays: Vec<DelayTicks>,
+            polarities: Vec<Polarity>,
+        }
+
+        let raw = RawSynapticGraph::deserialize(deserializer)?;
+
+        if raw.row_ptr.len() != raw.neuron_count + 1 {
+            return Err(DeError::custom(format!(
+                "row_ptr length {} does not match neuron_count + 1 ({})",
+                raw.row_ptr.len(),
+                raw.neuron_count + 1
+            )));
+        }
+        if raw.row_ptr.first().copied() != Some(0) {
+            return Err(DeError::custom("row_ptr must start at 0"));
+        }
+        if !raw.row_ptr.windows(2).all(|w| w[0] <= w[1]) {
+            return Err(DeError::custom("row_ptr must be non-decreasing"));
+        }
+
+        let nnz = *raw.row_ptr.last().expect("row_ptr is non-empty");
+        if raw.targets.len() != nnz
+            || raw.weights.len() != nnz
+            || raw.delays.len() != nnz
+            || raw.polarities.len() != nnz
+        {
+            return Err(DeError::custom(
+                "targets/weights/delays/polarities must each have length equal to row_ptr's final offset",
+            ));
+        }
+        if raw.targets.iter().any(|&t| t as usize >= raw.neuron_count) {
+            return Err(DeError::custom("target neuron id out of bounds"));
+        }
+
+        Ok(SynapticGraph {
+            neuron_count: raw.neuron_count,
+            row_ptr: raw.row_ptr,
+            targets: raw.targets,
+            weights: raw.weights,
+            delays: raw.delays,
+            polarities: raw.polarities,
+        })
+    }
 }
 
 impl SynapticGraph {
@@ -328,6 +391,30 @@ mod tests {
         ];
         let graph = SynapticGraph::from_descriptors(2, &descs).unwrap();
         assert_eq!(graph.max_delay(), 7);
+    }
+
+    #[test]
+    fn deserialize_rejects_row_ptr_length_mismatch() {
+        let json = r#"{"neuron_count":2,"row_ptr":[0,1],"targets":[],"weights":[],"delays":[],"polarities":[]}"#;
+        assert!(serde_json::from_str::<SynapticGraph>(json).is_err());
+    }
+
+    #[test]
+    fn deserialize_rejects_non_monotonic_row_ptr() {
+        let json = r#"{"neuron_count":2,"row_ptr":[0,3,1],"targets":[0,0,0],"weights":[0.1,0.1,0.1],"delays":[1,1,1],"polarities":["Excitatory","Excitatory","Excitatory"]}"#;
+        assert!(serde_json::from_str::<SynapticGraph>(json).is_err());
+    }
+
+    #[test]
+    fn deserialize_rejects_edge_array_length_mismatch() {
+        let json = r#"{"neuron_count":1,"row_ptr":[0,2],"targets":[0],"weights":[0.1,0.1],"delays":[1,1],"polarities":["Excitatory","Excitatory"]}"#;
+        assert!(serde_json::from_str::<SynapticGraph>(json).is_err());
+    }
+
+    #[test]
+    fn deserialize_rejects_out_of_range_target() {
+        let json = r#"{"neuron_count":1,"row_ptr":[0,1],"targets":[5],"weights":[0.1],"delays":[1],"polarities":["Excitatory"]}"#;
+        assert!(serde_json::from_str::<SynapticGraph>(json).is_err());
     }
 
     #[test]
