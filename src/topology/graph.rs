@@ -43,65 +43,99 @@ pub struct SynapticGraph {
     polarities: Vec<Polarity>,
 }
 
+#[derive(Deserialize)]
+struct RawSynapticGraph {
+    neuron_count: usize,
+    row_ptr: Vec<usize>,
+    targets: Vec<NeuronId>,
+    weights: Vec<f32>,
+    delays: Vec<DelayTicks>,
+    polarities: Vec<Polarity>,
+}
+
+impl RawSynapticGraph {
+    /// Re-validates the CSR invariants that [`SynapticGraph::from_descriptors`]
+    /// enforces at construction time, since a derived `Deserialize` would
+    /// accept arbitrary field values (mismatched `row_ptr` length,
+    /// non-monotonic offsets, out-of-range targets) that later panic in
+    /// [`SynapticGraph::outgoing`] or [`SynapticGraph::out_degree`].
+    fn into_graph(self) -> std::result::Result<SynapticGraph, String> {
+        let nnz = validate_row_ptr(&self.row_ptr, self.neuron_count)?;
+        validate_edge_array_lengths(
+            nnz,
+            [
+                ("targets", self.targets.len()),
+                ("weights", self.weights.len()),
+                ("delays", self.delays.len()),
+                ("polarities", self.polarities.len()),
+            ],
+        )?;
+        validate_targets_in_bounds(&self.targets, self.neuron_count)?;
+
+        Ok(SynapticGraph {
+            neuron_count: self.neuron_count,
+            row_ptr: self.row_ptr,
+            targets: self.targets,
+            weights: self.weights,
+            delays: self.delays,
+            polarities: self.polarities,
+        })
+    }
+}
+
+/// Checks `row_ptr` has `neuron_count + 1` entries starting at 0 and
+/// non-decreasing, returning the total edge count (its final entry).
+fn validate_row_ptr(row_ptr: &[usize], neuron_count: usize) -> std::result::Result<usize, String> {
+    if row_ptr.len() != neuron_count + 1 {
+        return Err(format!(
+            "row_ptr length {} does not match neuron_count + 1 ({})",
+            row_ptr.len(),
+            neuron_count + 1
+        ));
+    }
+    if row_ptr.first().copied() != Some(0) {
+        return Err("row_ptr must start at 0".to_string());
+    }
+    if !row_ptr.windows(2).all(|w| w[0] <= w[1]) {
+        return Err("row_ptr must be non-decreasing".to_string());
+    }
+    Ok(*row_ptr.last().expect("row_ptr is non-empty"))
+}
+
+/// Checks that every named edge array has exactly `nnz` entries.
+fn validate_edge_array_lengths(
+    nnz: usize,
+    arrays: [(&str, usize); 4],
+) -> std::result::Result<(), String> {
+    for (name, len) in arrays {
+        if len != nnz {
+            return Err(format!(
+                "{name} length {len} does not match row_ptr's final offset {nnz}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Checks that every target neuron id is within `[0, neuron_count)`.
+fn validate_targets_in_bounds(
+    targets: &[NeuronId],
+    neuron_count: usize,
+) -> std::result::Result<(), String> {
+    if targets.iter().any(|&t| t as usize >= neuron_count) {
+        return Err("target neuron id out of bounds".to_string());
+    }
+    Ok(())
+}
+
 impl<'de> Deserialize<'de> for SynapticGraph {
-    /// Deserializes and re-validates the CSR invariants that
-    /// [`SynapticGraph::from_descriptors`] enforces at construction time,
-    /// since a derived `Deserialize` would accept arbitrary field values
-    /// (mismatched `row_ptr` length, non-monotonic offsets, out-of-range
-    /// targets) that later panic in [`SynapticGraph::outgoing`] or
-    /// [`SynapticGraph::out_degree`].
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        #[derive(Deserialize)]
-        struct RawSynapticGraph {
-            neuron_count: usize,
-            row_ptr: Vec<usize>,
-            targets: Vec<NeuronId>,
-            weights: Vec<f32>,
-            delays: Vec<DelayTicks>,
-            polarities: Vec<Polarity>,
-        }
-
-        let raw = RawSynapticGraph::deserialize(deserializer)?;
-
-        if raw.row_ptr.len() != raw.neuron_count + 1 {
-            return Err(DeError::custom(format!(
-                "row_ptr length {} does not match neuron_count + 1 ({})",
-                raw.row_ptr.len(),
-                raw.neuron_count + 1
-            )));
-        }
-        if raw.row_ptr.first().copied() != Some(0) {
-            return Err(DeError::custom("row_ptr must start at 0"));
-        }
-        if !raw.row_ptr.windows(2).all(|w| w[0] <= w[1]) {
-            return Err(DeError::custom("row_ptr must be non-decreasing"));
-        }
-
-        let nnz = *raw.row_ptr.last().expect("row_ptr is non-empty");
-        if raw.targets.len() != nnz
-            || raw.weights.len() != nnz
-            || raw.delays.len() != nnz
-            || raw.polarities.len() != nnz
-        {
-            return Err(DeError::custom(
-                "targets/weights/delays/polarities must each have length equal to row_ptr's final offset",
-            ));
-        }
-        if raw.targets.iter().any(|&t| t as usize >= raw.neuron_count) {
-            return Err(DeError::custom("target neuron id out of bounds"));
-        }
-
-        Ok(SynapticGraph {
-            neuron_count: raw.neuron_count,
-            row_ptr: raw.row_ptr,
-            targets: raw.targets,
-            weights: raw.weights,
-            delays: raw.delays,
-            polarities: raw.polarities,
-        })
+        RawSynapticGraph::deserialize(deserializer)?
+            .into_graph()
+            .map_err(DeError::custom)
     }
 }
 
