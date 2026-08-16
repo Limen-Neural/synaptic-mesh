@@ -71,6 +71,7 @@ impl RawSynapticGraph {
             ],
         )?;
         validate_targets_in_bounds(&self.targets, self.neuron_count)?;
+        validate_weights_finite(&self.weights)?;
 
         Ok(SynapticGraph {
             neuron_count: self.neuron_count,
@@ -127,6 +128,16 @@ fn validate_targets_in_bounds(
 ) -> std::result::Result<(), String> {
     if targets.iter().any(|&t| t as usize >= neuron_count) {
         return Err("target neuron id out of bounds".to_string());
+    }
+    Ok(())
+}
+
+/// Checks that every weight is finite, so a non-JSON format (which, unlike
+/// JSON, can represent NaN/Inf) can't smuggle in a value that poisons
+/// current sums in [`crate::mesh::SynapticMesh::propagate`].
+fn validate_weights_finite(weights: &[f32]) -> std::result::Result<(), String> {
+    if weights.iter().any(|w| !w.is_finite()) {
+        return Err("synapse weight must be finite".to_string());
     }
     Ok(())
 }
@@ -446,6 +457,18 @@ mod tests {
     fn deserialize_rejects_edge_array_length_mismatch() {
         let json = r#"{"neuron_count":1,"row_ptr":[0,2],"targets":[0],"weights":[0.1,0.1],"delays":[1,1],"polarities":["Excitatory","Excitatory"]}"#;
         assert!(serde_json::from_str::<SynapticGraph>(json).is_err());
+    }
+
+    #[test]
+    fn validate_weights_finite_rejects_nan_and_infinite() {
+        // JSON has no literal for NaN/Infinity, so this exercises the
+        // validator directly rather than through a JSON round-trip; a
+        // non-JSON serde format (bincode, postcard, cbor) could otherwise
+        // smuggle these values into a deserialized graph.
+        assert!(validate_weights_finite(&[0.1, f32::NAN]).is_err());
+        assert!(validate_weights_finite(&[0.1, f32::INFINITY]).is_err());
+        assert!(validate_weights_finite(&[0.1, f32::NEG_INFINITY]).is_err());
+        assert!(validate_weights_finite(&[0.1, -0.4, 2.0]).is_ok());
     }
 
     #[test]
