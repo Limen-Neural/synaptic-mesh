@@ -86,11 +86,14 @@ impl RawSynapticGraph {
 /// Checks `row_ptr` has `neuron_count + 1` entries starting at 0 and
 /// non-decreasing, returning the total edge count (its final entry).
 fn validate_row_ptr(row_ptr: &[usize], neuron_count: usize) -> std::result::Result<usize, String> {
-    if row_ptr.len() != neuron_count + 1 {
+    let expected_len = neuron_count
+        .checked_add(1)
+        .ok_or_else(|| format!("neuron_count {neuron_count} is too large"))?;
+    if row_ptr.len() != expected_len {
         return Err(format!(
             "row_ptr length {} does not match neuron_count + 1 ({})",
             row_ptr.len(),
-            neuron_count + 1
+            expected_len
         ));
     }
     if row_ptr.first().copied() != Some(0) {
@@ -442,6 +445,12 @@ mod tests {
     #[test]
     fn deserialize_rejects_edge_array_length_mismatch() {
         let json = r#"{"neuron_count":1,"row_ptr":[0,2],"targets":[0],"weights":[0.1,0.1],"delays":[1,1],"polarities":["Excitatory","Excitatory"]}"#;
+        assert!(serde_json::from_str::<SynapticGraph>(json).is_err());
+    }
+
+    #[test]
+    fn deserialize_rejects_usize_max_neuron_count_without_overflow_panic() {
+        let json = r#"{"neuron_count":18446744073709551615,"row_ptr":[0,1],"targets":[0],"weights":[0.1],"delays":[1],"polarities":["Excitatory"]}"#;
         assert!(serde_json::from_str::<SynapticGraph>(json).is_err());
     }
 
