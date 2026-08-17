@@ -22,6 +22,10 @@ First versioned history. Nothing before this tag was published or tagged.
 - **CI**: GitHub Actions workflow (`.github/workflows/ci.yml`) running
   `cargo fmt --check`, `cargo clippy -D warnings`, `cargo build`, and
   `cargo test` on every push/PR to `main`.
+- MSRV pin **1.97.1** in `Cargo.toml` `rust-version`, `rust-toolchain.toml`,
+  and CI (`dtolnay/rust-toolchain` + pin-agreement check).
+- `PartialEq` on `SynapticGraph` and `SynapseDescriptor`, plus a JSON
+  serde round-trip test.
 - `inhibitory_fraction` range validation to all topology generators
   (`generate_random`, `generate_small_world`, `generate_scale_free`,
   `generate_layered`) — rejects values outside `[0, 1]`.

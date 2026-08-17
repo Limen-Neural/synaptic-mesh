@@ -5,6 +5,7 @@
 //! Shared scalar types, measurement units, and configuration structs used
 //! across the topology, delay, and mesh modules.
 
+use serde::de::{Deserializer, Error as DeError};
 use serde::{Deserialize, Serialize};
 
 // ── Scalar aliases ────────────────────────────────────────────────────────────
@@ -47,13 +48,14 @@ impl Polarity {
 // ── Synapse descriptor ────────────────────────────────────────────────────────
 
 /// A fully-described synaptic connection with weight, delay, and polarity.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct SynapseDescriptor {
     /// Source neuron.
     pub source: NeuronId,
     /// Target neuron.
     pub target: NeuronId,
     /// Absolute synaptic weight (always ≥ 0; sign comes from polarity).
+    #[serde(deserialize_with = "deserialize_nonnegative_weight")]
     pub weight: f32,
     /// Axonal propagation delay in ticks.
     pub delay: DelayTicks,
@@ -66,6 +68,22 @@ impl SynapseDescriptor {
     pub fn effective_weight(&self) -> f32 {
         self.weight * self.polarity.sign()
     }
+}
+
+/// Rejects negative or non-finite weights so deserialized descriptors keep
+/// the documented `weight >= 0` invariant that [`SynapseDescriptor::effective_weight`]
+/// relies on to apply polarity correctly.
+fn deserialize_nonnegative_weight<'de, D>(deserializer: D) -> std::result::Result<f32, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let weight = f32::deserialize(deserializer)?;
+    if !weight.is_finite() || weight < 0.0 {
+        return Err(DeError::custom(format!(
+            "synapse weight must be finite and non-negative, got {weight}"
+        )));
+    }
+    Ok(weight)
 }
 
 // ── Topology parameters ──────────────────────────────────────────────────────
@@ -150,5 +168,24 @@ pub enum DelayModel {
 impl Default for DelayModel {
     fn default() -> Self {
         Self::Fixed { delay: 1 }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deserialize_rejects_negative_weight() {
+        let json = r#"{"source":0,"target":1,"weight":-0.5,"delay":1,"polarity":"Excitatory"}"#;
+        assert!(serde_json::from_str::<SynapseDescriptor>(json).is_err());
+    }
+
+    #[test]
+    fn deserialize_accepts_valid_weight() {
+        let json = r#"{"source":0,"target":1,"weight":0.5,"delay":1,"polarity":"Inhibitory"}"#;
+        let desc: SynapseDescriptor = serde_json::from_str(json).unwrap();
+        assert_eq!(desc.weight, 0.5);
+        assert!((desc.effective_weight() + 0.5).abs() < 1e-6);
     }
 }

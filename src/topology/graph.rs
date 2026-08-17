@@ -6,6 +6,7 @@
 //! axonal delay and polarity information. This is the core "wiring diagram"
 //! that the `SynapticMesh` orchestrator uses for spike propagation.
 
+use serde::de::{Deserializer, Error as DeError};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{MeshError, Result};
@@ -25,7 +26,7 @@ use crate::types::{DelayTicks, NeuronId, Polarity, SynapseDescriptor};
 /// delays:     [2, 5, 1, ...]            — axonal delay in ticks
 /// polarities: [Exc, Inh, Exc, ...]      — Dale's law polarity
 /// ```
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct SynapticGraph {
     /// Number of neurons in the graph.
     neuron_count: usize,
@@ -40,6 +41,116 @@ pub struct SynapticGraph {
     delays: Vec<DelayTicks>,
     /// Polarity per synapse.
     polarities: Vec<Polarity>,
+}
+
+#[derive(Deserialize)]
+struct RawSynapticGraph {
+    neuron_count: usize,
+    row_ptr: Vec<usize>,
+    targets: Vec<NeuronId>,
+    weights: Vec<f32>,
+    delays: Vec<DelayTicks>,
+    polarities: Vec<Polarity>,
+}
+
+impl RawSynapticGraph {
+    /// Re-validates the CSR invariants that [`SynapticGraph::from_descriptors`]
+    /// enforces at construction time, since a derived `Deserialize` would
+    /// accept arbitrary field values (mismatched `row_ptr` length,
+    /// non-monotonic offsets, out-of-range targets) that later panic in
+    /// [`SynapticGraph::outgoing`] or [`SynapticGraph::out_degree`].
+    fn into_graph(self) -> std::result::Result<SynapticGraph, String> {
+        let nnz = validate_row_ptr(&self.row_ptr, self.neuron_count)?;
+        validate_edge_array_lengths(
+            nnz,
+            [
+                ("targets", self.targets.len()),
+                ("weights", self.weights.len()),
+                ("delays", self.delays.len()),
+                ("polarities", self.polarities.len()),
+            ],
+        )?;
+        validate_targets_in_bounds(&self.targets, self.neuron_count)?;
+        validate_weights_finite(&self.weights)?;
+
+        Ok(SynapticGraph {
+            neuron_count: self.neuron_count,
+            row_ptr: self.row_ptr,
+            targets: self.targets,
+            weights: self.weights,
+            delays: self.delays,
+            polarities: self.polarities,
+        })
+    }
+}
+
+/// Checks `row_ptr` has `neuron_count + 1` entries starting at 0 and
+/// non-decreasing, returning the total edge count (its final entry).
+fn validate_row_ptr(row_ptr: &[usize], neuron_count: usize) -> std::result::Result<usize, String> {
+    let expected_len = neuron_count
+        .checked_add(1)
+        .ok_or_else(|| format!("neuron_count {neuron_count} is too large"))?;
+    if row_ptr.len() != expected_len {
+        return Err(format!(
+            "row_ptr length {} does not match neuron_count + 1 ({})",
+            row_ptr.len(),
+            expected_len
+        ));
+    }
+    if row_ptr.first().copied() != Some(0) {
+        return Err("row_ptr must start at 0".to_string());
+    }
+    if !row_ptr.windows(2).all(|w| w[0] <= w[1]) {
+        return Err("row_ptr must be non-decreasing".to_string());
+    }
+    Ok(*row_ptr.last().expect("row_ptr is non-empty"))
+}
+
+/// Checks that every named edge array has exactly `nnz` entries.
+fn validate_edge_array_lengths(
+    nnz: usize,
+    arrays: [(&str, usize); 4],
+) -> std::result::Result<(), String> {
+    for (name, len) in arrays {
+        if len != nnz {
+            return Err(format!(
+                "{name} length {len} does not match row_ptr's final offset {nnz}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Checks that every target neuron id is within `[0, neuron_count)`.
+fn validate_targets_in_bounds(
+    targets: &[NeuronId],
+    neuron_count: usize,
+) -> std::result::Result<(), String> {
+    if targets.iter().any(|&t| t as usize >= neuron_count) {
+        return Err("target neuron id out of bounds".to_string());
+    }
+    Ok(())
+}
+
+/// Checks that every weight is finite, so a non-JSON format (which, unlike
+/// JSON, can represent NaN/Inf) can't smuggle in a value that poisons
+/// current sums in [`crate::mesh::SynapticMesh::propagate`].
+fn validate_weights_finite(weights: &[f32]) -> std::result::Result<(), String> {
+    if weights.iter().any(|w| !w.is_finite()) {
+        return Err("synapse weight must be finite".to_string());
+    }
+    Ok(())
+}
+
+impl<'de> Deserialize<'de> for SynapticGraph {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        RawSynapticGraph::deserialize(deserializer)?
+            .into_graph()
+            .map_err(DeError::custom)
+    }
 }
 
 impl SynapticGraph {
@@ -276,6 +387,39 @@ mod tests {
     }
 
     #[test]
+    fn synaptic_graph_json_roundtrip() {
+        let descs = vec![
+            SynapseDescriptor {
+                source: 0,
+                target: 1,
+                weight: 0.9,
+                delay: 3,
+                polarity: Polarity::Excitatory,
+            },
+            SynapseDescriptor {
+                source: 0,
+                target: 2,
+                weight: 0.15,
+                delay: 1,
+                polarity: Polarity::Inhibitory,
+            },
+            SynapseDescriptor {
+                source: 2,
+                target: 1,
+                weight: 0.4,
+                delay: 5,
+                polarity: Polarity::Excitatory,
+            },
+        ];
+        let graph = SynapticGraph::from_descriptors(3, &descs)
+            .expect("hand-written descriptors must build a graph");
+        let json = serde_json::to_string(&graph).expect("serialize SynapticGraph to JSON");
+        let restored: SynapticGraph =
+            serde_json::from_str(&json).expect("deserialize SynapticGraph from JSON");
+        assert_eq!(restored, graph);
+    }
+
+    #[test]
     fn max_delay_reports_correctly() {
         let descs = vec![
             SynapseDescriptor {
@@ -295,6 +439,48 @@ mod tests {
         ];
         let graph = SynapticGraph::from_descriptors(2, &descs).unwrap();
         assert_eq!(graph.max_delay(), 7);
+    }
+
+    #[test]
+    fn deserialize_rejects_row_ptr_length_mismatch() {
+        let json = r#"{"neuron_count":2,"row_ptr":[0,1],"targets":[],"weights":[],"delays":[],"polarities":[]}"#;
+        assert!(serde_json::from_str::<SynapticGraph>(json).is_err());
+    }
+
+    #[test]
+    fn deserialize_rejects_non_monotonic_row_ptr() {
+        let json = r#"{"neuron_count":2,"row_ptr":[0,3,1],"targets":[0,0,0],"weights":[0.1,0.1,0.1],"delays":[1,1,1],"polarities":["Excitatory","Excitatory","Excitatory"]}"#;
+        assert!(serde_json::from_str::<SynapticGraph>(json).is_err());
+    }
+
+    #[test]
+    fn deserialize_rejects_edge_array_length_mismatch() {
+        let json = r#"{"neuron_count":1,"row_ptr":[0,2],"targets":[0],"weights":[0.1,0.1],"delays":[1,1],"polarities":["Excitatory","Excitatory"]}"#;
+        assert!(serde_json::from_str::<SynapticGraph>(json).is_err());
+    }
+
+    #[test]
+    fn validate_weights_finite_rejects_nan_and_infinite() {
+        // JSON has no literal for NaN/Infinity, so this exercises the
+        // validator directly rather than through a JSON round-trip; a
+        // non-JSON serde format (bincode, postcard, cbor) could otherwise
+        // smuggle these values into a deserialized graph.
+        assert!(validate_weights_finite(&[0.1, f32::NAN]).is_err());
+        assert!(validate_weights_finite(&[0.1, f32::INFINITY]).is_err());
+        assert!(validate_weights_finite(&[0.1, f32::NEG_INFINITY]).is_err());
+        assert!(validate_weights_finite(&[0.1, -0.4, 2.0]).is_ok());
+    }
+
+    #[test]
+    fn deserialize_rejects_usize_max_neuron_count_without_overflow_panic() {
+        let json = r#"{"neuron_count":18446744073709551615,"row_ptr":[0,1],"targets":[0],"weights":[0.1],"delays":[1],"polarities":["Excitatory"]}"#;
+        assert!(serde_json::from_str::<SynapticGraph>(json).is_err());
+    }
+
+    #[test]
+    fn deserialize_rejects_out_of_range_target() {
+        let json = r#"{"neuron_count":1,"row_ptr":[0,1],"targets":[5],"weights":[0.1],"delays":[1],"polarities":["Excitatory"]}"#;
+        assert!(serde_json::from_str::<SynapticGraph>(json).is_err());
     }
 
     #[test]
