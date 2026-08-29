@@ -41,7 +41,9 @@ codegen-units = 1
 strip = true
 
 # Mirrors `release` so criterion benchmarks (GH#17) reflect real release
-# performance; keep debug symbols so profilers can still symbolize.
+# performance; keep debug symbols so profilers can still symbolize (override
+# `release`'s strip, which would otherwise discard them).
 [profile.bench]
 inherits = "release"
 debug = true
+strip = false
