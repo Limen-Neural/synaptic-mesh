@@ -20,6 +20,9 @@ serde_json = "1.0"
 
 [workspace]
 
+# See REVIEW.md "Build profiles" for a table of when to use each profile
+# below and the command that invokes it.
+
 # Fast iteration: no optimization, full debug info, incremental compiles.
 [profile.dev]
 opt-level = 0
@@ -40,9 +43,10 @@ lto = "thin"
 codegen-units = 1
 strip = true
 
-# Mirrors `release` so criterion benchmarks (GH#17) reflect real release
-# performance; keep debug symbols so profilers can still symbolize (override
-# `release`'s strip, which would otherwise discard them).
+# Mirrors `release` so that once benchmarks are added (GH#17, not yet
+# implemented), they reflect real release performance; keep debug symbols
+# so profilers can still symbolize (override `release`'s strip, which
+# would otherwise discard them).
 [profile.bench]
 inherits = "release"
 debug = true
