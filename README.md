@@ -6,7 +6,7 @@
 <p align="center">SNN wiring, topology generation, and temporal delay infrastructure</p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.1.0-informational" alt="0.1.0 (not yet on crates.io)">
+  <img src="https://img.shields.io/badge/version-0.2.0-informational" alt="0.2.0 (not yet on crates.io)">
   <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="MIT OR Apache-2.0">
 </p>
 
