@@ -30,7 +30,7 @@ Not yet on crates.io. Until a crates.io release is available, depend on git:
 synaptic-mesh = { git = "https://github.com/Limen-Neural/synaptic-mesh" }
 ```
 
-After the `v0.1.0` tag exists you can pin it with `tag = "v0.1.0"`.
+Pin to a released tag with `tag = "v0.2.0"` (see [releases](https://github.com/Limen-Neural/synaptic-mesh/releases) for the latest).
 
 See [REVIEW.md](REVIEW.md#build-profiles) for which cargo build profile
 (`dev`, `test`, `release`, `bench`) to use and why.
