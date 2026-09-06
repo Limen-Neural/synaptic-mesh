@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-06
+
+Bridges v0.1.0 (API solidify) and v0.3.0 (first crates.io publish). Hardens
+the build/test/bench setup ahead of packaging for publish.
+
+### Added
+
+- **Cargo profiles**: explicit `[profile.dev]`, `[profile.test]`,
+  `[profile.release]`, and `[profile.bench]` in `Cargo.toml`, each tuned and
+  documented with a rationale comment (issue #40).
+- **CI**: workflow now builds under `release` and compiles under `bench`
+  in addition to the existing `dev` build and `test` run, so a broken or
+  reverted profile fails CI instead of only surfacing locally (issue #41).
+- **CI**: `cargo-deny` job checking advisories, license allowlist (dual
+  MIT/Apache-2.0), bans, and sources ahead of the crates.io publish
+  (issue #42).
+- **Docs**: "Build profiles" section in `REVIEW.md` listing each profile,
+  the command that uses it, and why it's configured that way, cross-linked
+  from `Cargo.toml` and `README.md` (issue #43).
+
+[0.2.0]: https://github.com/Limen-Neural/synaptic-mesh/compare/v0.1.0...v0.2.0
+
 ## [0.1.0] - 2026-08-14
 
 First versioned history. Nothing before this tag was published or tagged.
@@ -73,5 +95,5 @@ First versioned history. Nothing before this tag was published or tagged.
   derivable impls, redundant borrows).
 - Fixed `cargo fmt` formatting (module ordering, debug_assert wrapping).
 
-[Unreleased]: https://github.com/Limen-Neural/synaptic-mesh/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Limen-Neural/synaptic-mesh/compare/v0.2.0...HEAD
 [0.1.0]: https://github.com/Limen-Neural/synaptic-mesh/releases/tag/v0.1.0
