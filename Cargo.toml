@@ -20,6 +20,9 @@ serde_json = "1.0"
 
 [workspace]
 
+# See REVIEW.md "Build profiles" for a table of when to use each profile
+# below and the command that invokes it.
+
 # Fast iteration: no optimization, full debug info, incremental compiles.
 [profile.dev]
 opt-level = 0
