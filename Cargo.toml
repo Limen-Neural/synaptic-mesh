@@ -19,3 +19,31 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 [workspace]
+
+# Fast iteration: no optimization, full debug info, incremental compiles.
+[profile.dev]
+opt-level = 0
+debug = true
+incremental = true
+
+# Slightly optimized so the growing unit/property-test suite (GH#21) runs
+# faster, while keeping compile times close to `dev`.
+[profile.test]
+inherits = "dev"
+opt-level = 1
+
+# Tuned for the crates.io publish (GH#37): maximize runtime performance and
+# minimize binary size, with thin LTO to keep build times reasonable.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+
+# Mirrors `release` so criterion benchmarks (GH#17) reflect real release
+# performance; keep debug symbols so profilers can still symbolize (override
+# `release`'s strip, which would otherwise discard them).
+[profile.bench]
+inherits = "release"
+debug = true
+strip = false

@@ -105,3 +105,18 @@ jobs:
       # defined yet (#17), so this just confirms the profile itself is valid.
       - name: Bench compile check (bench profile)
         run: cargo bench --locked --all-features --no-run
+  cargo-deny:
+    name: Dependency audit (cargo-deny)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      # Keep in sync with the MSRV pin rule in REVIEW.md (issue #35).
+      - name: cargo-deny (advisories, licenses, bans, sources)
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          rust-version: "1.97.1"
