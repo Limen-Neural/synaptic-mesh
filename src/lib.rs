@@ -20,9 +20,10 @@
 //! 2. [`SynapticMesh::new`] to wrap it, then [`SynapticMesh::propagate`] once
 //!    per tick — its docs state the full delivery contract (destination,
 //!    sign, magnitude, tick).
-//! 3. [`topology::apply_dale_polarity`] and [`topology::assign_delays`] when
-//!    you want to set excitatory/inhibitory identity or distance-based delays
-//!    on a graph you built yourself.
+//! 3. [`topology::assign_delays`] to rewrite a descriptor list's delays from
+//!    neuron positions, and [`topology::apply_dale_polarity`] to compute a
+//!    per-neuron excitatory/inhibitory split — both work on the inputs to
+//!    [`SynapticGraph::from_descriptors`], not on an already-built graph.
 //! 4. [`sparse::SparseSynapticMap`] or [`SynapticMesh::to_gpu_arrays`] when
 //!    you need the weights as flat CSR arrays.
 //! 5. [`router::ChannelRouter`] only if you also want a sparse channel

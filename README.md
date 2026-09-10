@@ -52,7 +52,7 @@ crate. See [Crate boundary](#crate-boundary).
 | Wire up a network from a classic model | `topology::generate_small_world` and friends | [Topology Generation](#topology-generation) |
 | Run spikes through it, tick by tick | `SynapticMesh::propagate` | [Quick Start](#quick-start-building-a-mesh) |
 | Hand-build an exact graph | `SynapticGraph::from_descriptors` with `SynapseDescriptor` | [Spike delivery contract](#spike-delivery-contract) |
-| Set excitatory/inhibitory identity or distance-based delays | `topology::apply_dale_polarity`, `topology::assign_delays` | [Temporal Delays](#temporal-delays--spike-propagation) |
+| Plan polarity or distance-based delays *before* building a graph | `topology::apply_dale_polarity` (computes a per-neuron polarity vector), `topology::assign_delays` (rewrites descriptors in place) | [Temporal Delays](#temporal-delays--spike-propagation) |
 | Store a big sparse weight matrix / upload to a GPU | `SparseSynapticMap`, `SynapticMesh::to_gpu_arrays` | [Core Capabilities](#core-capabilities) |
 | Pick a few active channels out of many inputs | `ChannelRouter` | [Generic Channel Router](#generic-channel-router) |
 
@@ -137,8 +137,8 @@ The rules it guarantees:
 | Question | Answer |
 |----------|--------|
 | **Who** receives the current? | Every target of the firing neuron, per the graph. |
-| **What sign?** | The source neuron's polarity — inhibitory sources subtract (Dale's law). |
-| **What magnitude?** | The synapse weight, scaled by the activation when using `propagate_graded`. |
+| **What sign?** | The synapse's polarity — inhibitory synapses subtract. The generators assign polarity per source neuron (Dale's law); a hand-built graph gets whatever each descriptor declares. |
+| **What magnitude?** | The synapse weight, multiplied by the activation when using `propagate_graded` (a negative activation therefore flips the sign). |
 | **Which tick?** | `tick_fired + delay`; `delay = 0` arrives in the same call. |
 | **What if two spikes land together?** | They sum at the destination. |
 | **Is it reproducible?** | Yes — same graph and spikes give the same currents, including after `reset()`. |
@@ -178,12 +178,13 @@ This enables complex temporal dynamics like polychronization and coincidence det
 ```rust
 use synaptic_mesh::ChannelRouter;
 
-// Default 3-channel router
+// Default 3-channel router. `route` returns a Result: it errors if the
+// signal slice length doesn't match the configured channel count.
 let mut router = ChannelRouter::new();
-let decision = router.route(&[0.8, 0.2, 0.1]);
+let decision = router.route([0.8, 0.2, 0.1]).unwrap();
 
-// decision.active_channels → [0]
-// decision.firing_rates   → [0.75, 0.12, 0.0]
+assert_eq!(decision.active_channels, vec![0]);
+assert_eq!(decision.firing_rates.len(), 3);
 ```
 
 ### Configurable Channel Count
@@ -196,8 +197,9 @@ let config = RouterConfig {
     ..RouterConfig::default()
 };
 let mut router = ChannelRouter::with_config(config);
-let decision = router.route(&[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]);
-// decision.active_channels → [3]
+let decision = router.route([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]).unwrap();
+
+assert_eq!(decision.active_channels, vec![3]);
 ```
 
 ## Adaptation-Aware Routing
