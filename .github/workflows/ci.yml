@@ -131,9 +131,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo package --locked --list | tee packaged-files.txt
+          # Written outside the checkout: an untracked file in the working
+          # tree would make the `cargo package` step below fail as dirty.
+          listing="${RUNNER_TEMP:-/tmp}/packaged-files.txt"
+          cargo package --locked --list | tee "$listing"
           allowed='^(\.cargo_vcs_info\.json|CHANGELOG\.md|Cargo\.lock|Cargo\.toml|Cargo\.toml\.orig|LICENSE-[A-Za-z0-9.-]+|README\.md|(src|tests|benches)/.+\.rs)$'
-          unexpected=$(grep -Ev "$allowed" packaged-files.txt || true)
+          unexpected=$(grep -Ev "$allowed" "$listing" || true)
           if [ -n "$unexpected" ]; then
             echo "ERROR: unexpected files in the packaged crate — add them to" >&2
             echo "       'exclude' in Cargo.toml, or to the allowlist above:" >&2
@@ -152,9 +155,10 @@ jobs:
         run: |
           set -euo pipefail
           msrv=$(grep -m1 '^rust-version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
+          version=$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
           work=$(mktemp -d)
-          tar -xzf target/package/synaptic-mesh-*.crate -C "$work"
-          cd "$work"/synaptic-mesh-*/
+          tar -xzf "target/package/synaptic-mesh-${version}.crate" -C "$work"
+          cd "$work/synaptic-mesh-${version}"
           cargo "+$msrv" check --locked --all-targets
 
   cargo-deny:
