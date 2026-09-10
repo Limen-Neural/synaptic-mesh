@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Packaging**: `documentation = "https://docs.rs/synaptic-mesh"` and an
+  explicit `readme = "README.md"` in `Cargo.toml` (issue #34).
+
 ### Changed
 
 - **MSRV**: Rust pin raised from **1.97.1** to **1.98.1** in `Cargo.toml`
@@ -17,6 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `rust-version:` pin in `.github/workflows/ci.yml` against `Cargo.toml`,
   instead of only the first toolchain install, so a partially bumped or
   newly added job fails the check (issue #51).
+- **Version**: bumped to **0.3.0**, the first version published to crates.io
+  (issue #34).
+- **Packaging**: `exclude` now also drops `/.github/`, `/qodana.yaml`, and
+  `/REVIEW.md` from the published `.crate` (issue #34).
+- **Docs**: README leads with the crates.io install path
+  (`synaptic-mesh = "0.3"`), marks the git dependency as the bleeding-edge
+  alternative, and describes 0.3.0 as experimental pre-1.0. Repo-relative
+  logo and `REVIEW.md` links are absolute so they resolve on crates.io and
+  docs.rs, where those files are not packaged (issue #34).
 
 ## [0.2.0] - 2026-09-06
 

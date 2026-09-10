@@ -1,6 +1,6 @@
 [package]
 name = "synaptic-mesh"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 # Keep identical to rust-toolchain.toml `channel` and the CI workflow
 # `toolchain:` pin (see REVIEW.md "MSRV pin rule").
@@ -8,9 +8,13 @@ rust-version = "1.98.1"
 license = "MIT OR Apache-2.0"
 description = "An SNN based mesh for managing the wiring, topology, and temporal delays between neurons."
 repository = "https://github.com/Limen-Neural/synaptic-mesh"
+documentation = "https://docs.rs/synaptic-mesh"
+readme = "README.md"
 keywords = ["snn", "neuromorphic", "routing", "lif", "spikenaut"]
 categories = ["science", "algorithms", "simulation"]
-exclude = ["docs/"]
+# Dev tooling and repo-only assets a crates.io consumer never needs. The
+# packaged file list is asserted in CI (`cargo package --locked`).
+exclude = ["/docs/", "/.github/", "/qodana.yaml", "/REVIEW.md"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
