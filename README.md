@@ -12,7 +12,30 @@
 
 ---
 
-`synaptic-mesh` manages the wiring, topology, and temporal delays between neurons in spiking neural networks. It provides high-performance, deterministic graph generators (Small-World, Scale-Free, Layered) and a temporal delay infrastructure that simulates realistic axonal propagation.
+`synaptic-mesh` is the **connectivity layer** of a spiking neural network: it
+answers *which neuron connects to which*, *how strongly*, and *how long the
+spike takes to get there*. You bring the neuron model and the simulation loop;
+this crate wires the network and delivers each spike to the right target on the
+right tick.
+
+It is a plain library with one dependency (`serde`) — no framework, no runtime,
+no GPU requirement, and no assumptions about how your neurons integrate current.
+
+**Reach for it when you need to:**
+
+- generate a biologically plausible network (small-world, scale-free, layered,
+  or Erdős–Rényi) instead of hand-writing an adjacency matrix,
+- give synapses **axonal delays** so spikes arrive on a future tick, enabling
+  polychronization and coincidence detection,
+- respect **Dale's law** — a neuron is excitatory or inhibitory, and all of its
+  outgoing synapses follow,
+- store a large sparse weight matrix compactly (CSR) and hand it to a GPU,
+- get **reproducible** topologies: the generators hash neuron indices instead of
+  drawing from an RNG, so the same parameters always produce the same network.
+
+**It deliberately does not** implement neuron models (LIF, Izhikevich, …),
+learning rules, or training loops — those stay in your code or in a neuron-model
+crate. See [Crate boundary](#crate-boundary).
 
 ## Core Capabilities
 
@@ -20,7 +43,18 @@
 - **Temporal Propagation** — Per-synapse axonal delays stored alongside weights. Spikes are delivered at the correct future tick via a high-performance ring-buffer queue.
 - **Biologically Inspired Wiring** — Support for Dale's Law (fixed neuron polarity) and position-based distance-dependent connectivity.
 - **Sparse Synaptic Map (CSR)** — Compressed Sparse Row format for memory-efficient weight storage (20× reduction for sparse networks).
-- **Generic Channel Router** — A configurable multi-channel SNN router using neuromodulatory neurons for sparse signal classification.
+- **Generic Channel Router** *(optional)* — A configurable multi-channel router for sparse signal classification, usable on its own or ignored entirely.
+
+## Where to start
+
+| If you want to… | Use | Section |
+|-----------------|-----|---------|
+| Wire up a network from a classic model | `topology::generate_small_world` and friends | [Topology Generation](#topology-generation) |
+| Run spikes through it, tick by tick | `SynapticMesh::propagate` | [Quick Start](#quick-start-building-a-mesh) |
+| Hand-build an exact graph | `SynapticGraph::from_descriptors` with `SynapseDescriptor` | [Spike delivery contract](#spike-delivery-contract) |
+| Set excitatory/inhibitory identity or distance-based delays | `topology::apply_dale_polarity`, `topology::assign_delays` | [Temporal Delays](#temporal-delays--spike-propagation) |
+| Store a big sparse weight matrix / upload to a GPU | `SparseSynapticMap`, `SynapticMesh::to_gpu_arrays` | [Core Capabilities](#core-capabilities) |
+| Pick a few active channels out of many inputs | `ChannelRouter` | [Generic Channel Router](#generic-channel-router) |
 
 ## Installation
 
@@ -41,6 +75,8 @@ synaptic-mesh = { git = "https://github.com/Limen-Neural/synaptic-mesh" }
 
 Pin to a released tag with `tag = "v0.3.0"` (see [releases](https://github.com/Limen-Neural/synaptic-mesh/releases) for the latest).
 
+**MSRV:** Rust **1.98.1**. The only runtime dependency is `serde`.
+
 Contributors: see
 [REVIEW.md](https://github.com/Limen-Neural/synaptic-mesh/blob/main/REVIEW.md#build-profiles)
 for which cargo build profile (`dev`, `test`, `release`, `bench`) to use and why.
@@ -48,7 +84,7 @@ for which cargo build profile (`dev`, `test`, `release`, `bench`) to use and why
 ## Quick Start: Building a Mesh
 
 ```rust
-use synaptic_mesh::topology::generators::generate_small_world;
+use synaptic_mesh::topology::generate_small_world;
 use synaptic_mesh::mesh::SynapticMesh;
 
 // 1. Build a 1024-neuron small-world network with delays up to 10 ticks
@@ -66,6 +102,50 @@ let currents = mesh.propagate(&spikes).unwrap();
 // currents[i] = total incoming synaptic current at neuron i this tick,
 // potentially including delayed spikes from previous ticks.
 ```
+
+### Spike delivery contract
+
+`propagate()` is **one hop**: it converts the spikes you hand it into the
+currents arriving *this* tick. It never decides what fires next — that is your
+neuron model's job. A complete simulation loop is therefore just:
+
+```rust
+use synaptic_mesh::mesh::SynapticMesh;
+use synaptic_mesh::topology::SynapticGraph;
+use synaptic_mesh::types::{Polarity, SynapseDescriptor};
+
+// Hand-built graph: 0 ──(w=0.75, delay 0, excitatory)──▶ 1
+//                   0 ──(w=0.50, delay 2, excitatory)──▶ 2
+let graph = SynapticGraph::from_descriptors(3, &[
+    SynapseDescriptor { source: 0, target: 1, weight: 0.75, delay: 0, polarity: Polarity::Excitatory },
+    SynapseDescriptor { source: 0, target: 2, weight: 0.50, delay: 2, polarity: Polarity::Excitatory },
+]).unwrap();
+let mut mesh = SynapticMesh::new(graph);
+
+let mut spikes = vec![false, false, false];
+spikes[0] = true;
+
+for _tick in 0..3 {
+    let currents = mesh.propagate(&spikes).unwrap();
+    // Your neuron model goes here; this one is a bare threshold.
+    spikes = currents.iter().map(|&c| c > 0.3).collect();
+}
+```
+
+The rules it guarantees:
+
+| Question | Answer |
+|----------|--------|
+| **Who** receives the current? | Every target of the firing neuron, per the graph. |
+| **What sign?** | The source neuron's polarity — inhibitory sources subtract (Dale's law). |
+| **What magnitude?** | The synapse weight, scaled by the activation when using `propagate_graded`. |
+| **Which tick?** | `tick_fired + delay`; `delay = 0` arrives in the same call. |
+| **What if two spikes land together?** | They sum at the destination. |
+| **Is it reproducible?** | Yes — same graph and spikes give the same currents, including after `reset()`. |
+
+[`tests/propagate_contract.rs`](https://github.com/Limen-Neural/synaptic-mesh/blob/main/tests/propagate_contract.rs)
+pins every one of these against a fixed four-neuron graph and is a copyable
+starting point for your own loop.
 
 ## Topology Generation
 
@@ -91,10 +171,12 @@ This enables complex temporal dynamics like polychronization and coincidence det
 
 ## Generic Channel Router
 
-The crate includes `ChannelRouter`, a configurable multi-channel SNN router that integrates signal pulses across neuromodulatory neurons to produce sparse activation masks.
+*Optional — skip this section if you only need wiring and delays.*
+
+`ChannelRouter` is a standalone, configurable multi-channel classifier: it integrates input pulses over a bank of internal integrate-and-fire units and returns a sparse activation mask (which channels won, and at what firing rate). It does not use `SynapticMesh` and `SynapticMesh` does not use it — they are independent halves of the crate.
 
 ```rust
-use synaptic_mesh::{ChannelRouter, RouterConfig};
+use synaptic_mesh::ChannelRouter;
 
 // Default 3-channel router
 let mut router = ChannelRouter::new();
@@ -123,16 +205,27 @@ let decision = router.route(&[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]);
 - **Neuron State Snapshots** — Per-neuron adaptation and error tracking for dynamic routing decisions.
 - **Routing Policies** — Configurable scoring equations that balance spike activity, adaptation penalties, and error bonuses.
 
-## Crate Boundary
+## Crate boundary
 
-`synaptic-mesh` does **not** depend on the separate [`neuromod`](https://github.com/Limen-Neural/neuromod) crate. The two crates are kept independent so each can evolve without coupling:
+This crate owns connectivity and timing, and nothing else:
 
-| Crate | Owns |
-|-------|------|
-| **neuromod** | Canonical neuron models — LIF, Izhikevich, Hodgkin-Huxley, GIF, FitzHugh-Nagumo, Lapicque |
-| **synaptic-mesh** | Topology, wiring, delay infrastructure, CSR sparse maps, `ChannelRouter`, and its router-internal `NeuromodNeuron` (NIF) integration primitive |
+| In scope | Out of scope (bring your own) |
+|----------|-------------------------------|
+| Topology generation and hand-built graphs | Neuron models — LIF, Izhikevich, Hodgkin-Huxley, … |
+| Per-synapse weights, polarity, axonal delays | Learning rules, training loops, optimizers |
+| Tick-aligned spike delivery | Simulation scheduling, I/O, encoding of stimuli |
+| CSR sparse maps and GPU-ready arrays | GPU kernels, hardware backends |
+| Optional `ChannelRouter` classifier | — |
 
-`NeuromodNeuron` lives in [`router`](src/router.rs) — it's a router-internal integration primitive, not a general-purpose neuron model.
+Neuron models are a deliberate omission, not a gap: pair this crate with whatever integrator you already use, or with a dedicated crate such as [`neuromod`](https://github.com/Limen-Neural/neuromod) (LIF, Izhikevich, Hodgkin-Huxley, GIF, FitzHugh-Nagumo, Lapicque). `synaptic-mesh` takes **no dependency** on it, so the two evolve independently.
+
+The one neuron-like type here, `NeuromodNeuron` in [`router`](src/router.rs), is an integration primitive internal to `ChannelRouter` — not a general-purpose neuron model.
+
+## Used by
+
+Spikenaut-SNN uses this crate for Dale-polarity wiring and multi-channel
+routing. That is a downstream consumer, not a requirement: nothing in the API
+assumes it, and depending on `synaptic-mesh` pulls in nothing beyond `serde`.
 
 ## Architecture
 

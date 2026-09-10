@@ -2,8 +2,35 @@
 
 //! # synaptic-mesh
 //!
-//! Manages the wiring, topology, and temporal delays between neurons in
-//! spiking neural networks.
+//! The **connectivity layer** of a spiking neural network: which neuron
+//! connects to which, how strongly, and how long the spike takes to arrive.
+//! You bring the neuron model and the simulation loop; this crate wires the
+//! network and delivers each spike to the right target on the right tick.
+//!
+//! Reach for it to generate biologically plausible topologies, give synapses
+//! axonal delays, respect Dale's law, or store a large sparse weight matrix
+//! compactly — all deterministically, with `serde` as the only dependency.
+//!
+//! ## Where to start
+//!
+//! 1. [`topology::generate_small_world`] (or [`generate_random`],
+//!    [`generate_scale_free`], [`generate_layered`]) to build a
+//!    [`SynapticGraph`], or [`SynapticGraph::from_descriptors`] to specify
+//!    every synapse yourself.
+//! 2. [`SynapticMesh::new`] to wrap it, then [`SynapticMesh::propagate`] once
+//!    per tick — its docs state the full delivery contract (destination,
+//!    sign, magnitude, tick).
+//! 3. [`topology::apply_dale_polarity`] and [`topology::assign_delays`] when
+//!    you want to set excitatory/inhibitory identity or distance-based delays
+//!    on a graph you built yourself.
+//! 4. [`sparse::SparseSynapticMap`] or [`SynapticMesh::to_gpu_arrays`] when
+//!    you need the weights as flat CSR arrays.
+//! 5. [`router::ChannelRouter`] only if you also want a sparse channel
+//!    classifier; it is independent of the mesh and safe to ignore.
+//!
+//! [`generate_random`]: topology::generate_random
+//! [`generate_scale_free`]: topology::generate_scale_free
+//! [`generate_layered`]: topology::generate_layered
 //!
 //! ## Modules
 //!
@@ -13,17 +40,19 @@
 //! | [`delay`] | Temporal delay infrastructure — ring-buffer spike queues for tick-aligned delivery with configurable axonal propagation delays |
 //! | [`mesh`] | [`SynapticMesh`] orchestrator — the top-level struct owning topology + delays, provides `propagate()` for spike → current conversion |
 //! | [`sparse`] | Compressed Sparse Row (CSR) synaptic maps for GPU-optimized weight matrices |
-//! | [`router`] | Generic multi-channel SNN router using [`NeuromodNeuron`], a router-internal NIF integration primitive |
+//! | [`router`] | Optional multi-channel classifier built on [`NeuromodNeuron`], a router-internal integration primitive |
 //!
 //! ## Crate boundary
 //!
-//! `synaptic-mesh` does **not** depend on the separate `neuromod` crate. The
-//! two crates are kept independent so each can evolve without coupling:
+//! This crate owns connectivity and timing. Neuron models (LIF, Izhikevich,
+//! Hodgkin-Huxley, …), learning rules, and training loops are deliberately
+//! out of scope — pair it with whatever integrator you already use, or with a
+//! dedicated crate such as `neuromod`, on which `synaptic-mesh` takes **no**
+//! dependency so the two can evolve independently.
 //!
-//! | Crate | Owns |
-//! |-------|------|
-//! | **neuromod** | Canonical neuron models — LIF, Izhikevich, Hodgkin-Huxley, GIF, FitzHugh-Nagumo, Lapicque |
-//! | **synaptic-mesh** | Topology, wiring, delay infrastructure, CSR sparse maps, [`router::ChannelRouter`], and its router-internal [`NeuromodNeuron`] integration primitive |
+//! [`NeuromodNeuron`] is the one neuron-like type here: an integration
+//! primitive internal to [`router::ChannelRouter`], not a general-purpose
+//! neuron model.
 //!
 //! ## Quick start
 //!
@@ -127,3 +156,10 @@ pub use sparse::{
 
 #[cfg(test)]
 mod tests;
+
+/// Compiles the Rust examples in `README.md` as doctests, so the quickstart a
+/// new user copies is guaranteed to build against the current API using this
+/// crate alone. `cfg(doctest)` keeps the README out of the rendered docs.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeExamples;

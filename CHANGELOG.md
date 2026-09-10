@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-10
+
+First crates.io release. Packaging, docs, and the propagate contract are
+aimed at general SNN users depending on the crate without any Limen context.
+
 ### Added
 
 - **Packaging**: `documentation = "https://docs.rs/synaptic-mesh"` and an
@@ -18,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (issue #52).
 - **Docs**: `SynapticMesh::propagate` rustdoc now states the delivery
   contract explicitly and carries a runnable minimal example (issue #52).
+- **Docs**: README and crate-level docs are written for general SNN use —
+  what the crate is for, a "Where to start" map of the public API, the spike
+  delivery contract, an explicit scope boundary, and a "Used by" footnote
+  instead of downstream-specific framing (issue #53).
+- **Tests**: README Rust examples are compiled as doctests (`cfg(doctest)`
+  `include_str!`), so the quickstart cannot drift from the API (issue #53).
+- **CI**: the MSRV pin-agreement check also verifies the README's MSRV
+  line (issue #53).
 - **CI**: `package` job running `cargo package --locked`, asserting the
   packaged file list against an allowlist of consumer-relevant files, and
   building the unpacked `.crate` outside the repository so an over-eager
@@ -36,6 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   newly added job fails the check (issue #51).
 - **Version**: bumped to **0.3.0**, the first version published to crates.io
   (issue #34).
+- **Metadata**: crates.io keywords are now `snn`, `spiking`, `neuromorphic`,
+  `topology`, `routing` — `lif` (no neuron models live here) and `spikenaut`
+  (a downstream consumer, not a description of the crate) were dropped
+  (issue #53).
 - **Packaging**: `exclude` now also drops `/.github/`, `/qodana.yaml`, and
   `/REVIEW.md` from the published `.crate` (issue #34), plus the remaining
   dev-tooling files `/.codacy.yml`, `/.devin/`, `/.gitignore`, `/AGENTS.md`,
@@ -46,6 +63,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   alternative, and describes 0.3.0 as experimental pre-1.0. Repo-relative
   logo and `REVIEW.md` links are absolute so they resolve on crates.io and
   docs.rs, where those files are not packaged (issue #34).
+
+[0.3.0]: https://github.com/Limen-Neural/synaptic-mesh/compare/v0.2.0...v0.3.0
 
 ## [0.2.0] - 2026-09-06
 
@@ -135,5 +154,5 @@ First versioned history. Nothing before this tag was published or tagged.
   derivable impls, redundant borrows).
 - Fixed `cargo fmt` formatting (module ordering, debug_assert wrapping).
 
-[Unreleased]: https://github.com/Limen-Neural/synaptic-mesh/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Limen-Neural/synaptic-mesh/compare/v0.3.0...HEAD
 [0.1.0]: https://github.com/Limen-Neural/synaptic-mesh/releases/tag/v0.1.0

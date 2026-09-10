@@ -8,6 +8,11 @@
 //! The router is generic over channel count and supports adaptive
 //! neuromodulatory routing — channels strengthen with use (dopamine-gated)
 //! and weaken when idle (use-it-or-lose-it plasticity).
+//!
+//! This module is **optional and self-contained**: it neither uses nor is
+//! used by [`SynapticMesh`](crate::mesh::SynapticMesh). Reach for it when you
+//! need to pick a few active channels out of many inputs; ignore it entirely
+//! if you only need wiring, topology, and delays.
 
 use serde::{Deserialize, Serialize};
 
