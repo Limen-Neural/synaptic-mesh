@@ -59,6 +59,12 @@ impl SynapticMesh {
     /// Create a mesh with a custom maximum delay (overriding graph's max).
     ///
     /// Useful when you want headroom for future dynamic delay changes.
+    ///
+    /// `max_delay` must be at least `graph.max_delay()`. A smaller buffer
+    /// cannot represent the graph's longest delay: such a spike trips a
+    /// `debug_assert!` in debug builds and, in release builds, wraps around
+    /// the ring buffer to an earlier tick instead of being dropped. Use
+    /// [`SynapticMesh::new`] to size the buffer from the graph automatically.
     pub fn with_max_delay(graph: SynapticGraph, max_delay: usize) -> Self {
         let n = graph.neuron_count();
         Self {
@@ -85,10 +91,18 @@ impl SynapticMesh {
     ///
     /// 1. A spike from neuron `s` on tick `t` delivers current to every
     ///    target of `s` on tick `t + delay`. A `delay` of 0 arrives in the
-    ///    return value of this very call.
-    /// 2. The magnitude is the synapse's weight; the sign comes from the
-    ///    source neuron's [`Polarity`](crate::types::Polarity) (Dale's law),
-    ///    so an inhibitory source subtracts.
+    ///    return value of this very call. This assumes the delay buffer can
+    ///    hold the graph's delays, which [`SynapticMesh::new`] guarantees;
+    ///    see [`with_max_delay`] if you size it yourself.
+    /// 2. The magnitude is the synapse's weight and the sign is that
+    ///    synapse's [`Polarity`](crate::types::Polarity), so an inhibitory
+    ///    synapse subtracts. The generators assign polarity per source
+    ///    neuron (Dale's law), but [`SynapticGraph::from_descriptors`] takes
+    ///    each descriptor's polarity as given and does not check that one
+    ///    source's synapses agree.
+    ///
+    /// [`with_max_delay`]: Self::with_max_delay
+    /// [`SynapticGraph::from_descriptors`]: crate::topology::SynapticGraph::from_descriptors
     /// 3. Currents arriving at the same neuron on the same tick are summed.
     /// 4. Propagation is **one hop**: received current never becomes a spike
     ///    by itself. You own the neuron model — threshold the returned
