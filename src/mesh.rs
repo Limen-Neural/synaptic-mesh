@@ -80,6 +80,53 @@ impl SynapticMesh {
     /// Synaptic current vector of length `neuron_count()` — the total
     /// incoming current at each neuron for this tick (including delayed
     /// spikes from previous ticks).
+    ///
+    /// # Delivery contract
+    ///
+    /// 1. A spike from neuron `s` on tick `t` delivers current to every
+    ///    target of `s` on tick `t + delay`. A `delay` of 0 arrives in the
+    ///    return value of this very call.
+    /// 2. The magnitude is the synapse's weight; the sign comes from the
+    ///    source neuron's [`Polarity`](crate::types::Polarity) (Dale's law),
+    ///    so an inhibitory source subtracts.
+    /// 3. Currents arriving at the same neuron on the same tick are summed.
+    /// 4. Propagation is **one hop**: received current never becomes a spike
+    ///    by itself. You own the neuron model — threshold the returned
+    ///    currents and feed the result into the next call to build a
+    ///    multi-layer loop.
+    /// 5. Delivery is deterministic: the same graph and the same spike
+    ///    sequence produce the same currents, including after [`reset`].
+    ///
+    /// [`reset`]: Self::reset
+    ///
+    /// ```rust
+    /// use synaptic_mesh::mesh::SynapticMesh;
+    /// use synaptic_mesh::topology::SynapticGraph;
+    /// use synaptic_mesh::types::{Polarity, SynapseDescriptor};
+    ///
+    /// // 0 ──(w=0.75, delay 0, excitatory)──▶ 1
+    /// // 0 ──(w=0.50, delay 2, excitatory)──▶ 2
+    /// let graph = SynapticGraph::from_descriptors(
+    ///     3,
+    ///     &[
+    ///         SynapseDescriptor { source: 0, target: 1, weight: 0.75, delay: 0, polarity: Polarity::Excitatory },
+    ///         SynapseDescriptor { source: 0, target: 2, weight: 0.50, delay: 2, polarity: Polarity::Excitatory },
+    ///     ],
+    /// )?;
+    /// let mut mesh = SynapticMesh::new(graph);
+    ///
+    /// // Tick 0: neuron 0 fires — only the delay-0 synapse lands.
+    /// assert_eq!(mesh.propagate(&[true, false, false])?, vec![0.0, 0.75, 0.0]);
+    /// // Tick 1: nothing in flight arrives yet.
+    /// assert_eq!(mesh.propagate(&[false; 3])?, vec![0.0, 0.0, 0.0]);
+    /// // Tick 2: the delay-2 synapse arrives at neuron 2.
+    /// assert_eq!(mesh.propagate(&[false; 3])?, vec![0.0, 0.0, 0.50]);
+    /// # Ok::<(), synaptic_mesh::MeshError>(())
+    /// ```
+    ///
+    /// `tests/propagate_contract.rs` pins this contract — destination, sign,
+    /// magnitude, and delivery tick — against a fixed four-neuron graph, and
+    /// is a copyable starting point for your own simulation loop.
     pub fn propagate(&mut self, source_spikes: &[bool]) -> Result<Vec<f32>> {
         let n = self.graph.neuron_count();
         if source_spikes.len() != n {
