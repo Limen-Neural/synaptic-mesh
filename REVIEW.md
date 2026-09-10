@@ -37,6 +37,22 @@ The rationale above is kept in sync with the comments on each
 `[profile.*]` block in `Cargo.toml` — update both together if a profile
 changes.
 
+## Packaging
+
+Changes to `Cargo.toml` metadata, `exclude`, or anything that adds a
+top-level file should be checked against what actually ships:
+
+```bash
+cargo package --locked --list   # source, Cargo manifests, licenses, README, CHANGELOG
+cargo package --locked          # must succeed
+```
+
+CI's `package` job runs both, fails on any packaged file outside that
+allowlist, and builds the unpacked `.crate` from a temp directory so a
+file removed by `exclude` cannot break the published crate (issue #36).
+Add a genuinely new consumer-facing file to the allowlist in
+`.github/workflows/ci.yml`; anything else belongs in `exclude`.
+
 ## When to run
 
 - Before every push that changes core mesh, topology, or neuromodulation code.
