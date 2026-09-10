@@ -25,7 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Version**: bumped to **0.3.0**, the first version published to crates.io
   (issue #34).
 - **Packaging**: `exclude` now also drops `/.github/`, `/qodana.yaml`, and
-  `/REVIEW.md` from the published `.crate` (issue #34).
+  `/REVIEW.md` from the published `.crate` (issue #34), plus the remaining
+  dev-tooling files `/.codacy.yml`, `/.devin/`, `/.gitignore`, `/AGENTS.md`,
+  `/deny.toml`, and `/rust-toolchain.toml` (issue #49). The packaged crate is
+  now source, Cargo manifests, licenses, README, and CHANGELOG only.
 - **Docs**: README leads with the crates.io install path
   (`synaptic-mesh = "0.3"`), marks the git dependency as the bleeding-edge
   alternative, and describes 0.3.0 as experimental pre-1.0. Repo-relative
