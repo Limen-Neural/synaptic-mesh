@@ -34,8 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `rust-version:` pin in `.github/workflows/ci.yml` against `Cargo.toml`,
   instead of only the first toolchain install, so a partially bumped or
   newly added job fails the check (issue #51).
-- **Version**: bumped to **0.3.0**, the first version published to crates.io
-  (issue #34).
+- **Version**: bumped to **0.3.0**, the version prepared for the first
+  crates.io publish (issue #34; the publish itself is issue #37).
 - **Packaging**: `exclude` now also drops `/.github/`, `/qodana.yaml`, and
   `/REVIEW.md` from the published `.crate` (issue #34), plus the remaining
   dev-tooling files `/.codacy.yml`, `/.devin/`, `/.gitignore`, `/AGENTS.md`,

@@ -29,17 +29,17 @@
 synaptic-mesh = "0.3"
 ```
 
-`0.3.0` is the first crates.io release and is **experimental, pre-1.0**: the
-API is usable and tested, but minor releases may still contain breaking
-changes until 1.0. Pin an exact version (`= "0.3.0"`) if you need stability.
+`0.3.0` is **experimental, pre-1.0**: the API is usable and tested, but minor
+releases may still contain breaking changes until 1.0. Pin an exact version
+(`= "0.3.0"`) if you need stability.
 
-For bleeding-edge, unreleased changes, depend on git instead:
+For bleeding-edge changes that are not in a release yet, depend on git instead:
 
 ```toml
 synaptic-mesh = { git = "https://github.com/Limen-Neural/synaptic-mesh" }
 ```
 
-Pin to a released tag with `tag = "v0.3.0"` (see [releases](https://github.com/Limen-Neural/synaptic-mesh/releases) for the latest).
+Add `tag = "v0.3.0"` to pin a git dependency to a specific release instead of tracking `main` — see [releases](https://github.com/Limen-Neural/synaptic-mesh/releases) for the tags that exist today.
 
 Contributors: see
 [REVIEW.md](https://github.com/Limen-Neural/synaptic-mesh/blob/main/REVIEW.md#build-profiles)
