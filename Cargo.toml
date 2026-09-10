@@ -14,8 +14,9 @@ keywords = ["snn", "spiking", "neuromorphic", "topology", "routing"]
 categories = ["science", "algorithms", "simulation"]
 # Dev tooling and repo-only assets a crates.io consumer never needs, so the
 # published .crate is source + Cargo manifests + licenses + README +
-# CHANGELOG. The packaged file list is asserted in CI (`cargo package
-# --locked`). See issues #34 and #49.
+# CHANGELOG. CI's `package` job asserts the packaged file list; run
+# `cargo package --locked --list` locally after touching this list.
+# See issues #34, #49, and #36.
 exclude = [
     "/docs/",
     "/.github/",

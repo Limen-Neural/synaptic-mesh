@@ -12,15 +12,22 @@
 //!    of `s` on tick `t + delay`. `delay = 0` means same-tick delivery, so
 //!    the current appears in the return value of the very call that fed the
 //!    spike in.
-//! 2. The delivered magnitude is the descriptor's `weight`; the sign comes
-//!    from the source neuron's [`Polarity`] (Dale's law), so an inhibitory
-//!    source subtracts.
+//! 2. The delivered magnitude is the descriptor's `weight` and the sign is
+//!    that descriptor's [`Polarity`], so an inhibitory synapse subtracts.
+//!    This fixture follows Dale's law (a source's synapses share a
+//!    polarity) because the generators do, but `from_descriptors` applies
+//!    each descriptor's polarity as given rather than enforcing it.
 //! 3. Currents arriving at the same neuron on the same tick are summed.
 //! 4. `propagate` is **one hop**. Received current never becomes a spike on
 //!    its own — the caller owns the neuron model and decides what fires next
 //!    (see [`threshold_and_fire_loop_is_deterministic`]).
 //! 5. Everything is deterministic: same graph plus same spike sequence gives
 //!    bit-identical currents, run after run and after [`SynapticMesh::reset`].
+//!
+//! `propagate_graded` keeps rules 1, 3, and 4 and multiplies each delivery by
+//! the source's activation — including its sign, so a negative activation
+//! inverts the synapse's polarity (see
+//! [`negative_graded_activation_inverts_polarity`]).
 //!
 //! # Fixture
 //!
@@ -47,8 +54,10 @@ use synaptic_mesh::types::{Polarity, SynapseDescriptor};
 /// Neuron count of the fixture graph.
 const N: usize = 4;
 
-/// Absolute tolerance for comparing `f32` currents. The fixture weights are
-/// exactly representable, so deliveries are compared against exact sums.
+/// Absolute tolerance for comparing `f32` currents. Weights such as 0.40 and
+/// 0.60 are not exactly representable in `f32`, so sums land within ~1e-8 of
+/// the decimal values written here; this tolerance absorbs that while staying
+/// far below the differences the assertions are meant to catch.
 const EPS: f32 = 1e-6;
 
 /// Build the fixture described in the module docs.
@@ -189,18 +198,22 @@ fn reset_replays_identically_and_drops_in_flight_spikes() {
     mesh.reset();
     assert_eq!(mesh.tick(), 0);
 
-    let idle = mesh.propagate(&spikes(&[])).unwrap();
-    assert_currents(0, &idle, [0.0; N]);
+    // Run past the longest delay: if reset had only rewound the tick
+    // counter, those queued deliveries would surface on one of these ticks.
+    for tick in 0..=mesh.max_delay() as u64 {
+        let idle = mesh.propagate(&spikes(&[])).unwrap();
+        assert_currents(tick, &idle, [0.0; N]);
+    }
 
     mesh.reset();
     let replay = mesh.propagate(&spikes(&[0])).unwrap();
     assert_eq!(first, replay);
 }
 
-/// `propagate_graded` follows the same destination/sign/tick contract, with
-/// the delivered magnitude scaled by the source activation.
+/// `propagate_graded` keeps the same destinations and delivery ticks, and
+/// multiplies each delivery by the source activation.
 #[test]
-fn graded_activation_scales_magnitude_only() {
+fn graded_activation_scales_the_delivered_current() {
     let mut mesh = fixture();
 
     // Neuron 0 at half strength: 0.5 × 0.75 = 0.375 on neuron 1 this tick.
@@ -210,6 +223,25 @@ fn graded_activation_scales_magnitude_only() {
     // Delays are unchanged by scaling: 0.5 × 0.50 = 0.25 on neuron 2 next tick.
     let t1 = mesh.propagate_graded(&[0.0; N]).unwrap();
     assert_currents(1, &t1, [0.0, 0.0, 0.25, 0.0]);
+}
+
+/// A negative activation multiplies the already-signed weight, so it flips
+/// the synapse's polarity. That is a genuine multiplication, not a bug — but
+/// it is a sharp edge worth pinning: pass activations ≥ 0 unless you mean it.
+#[test]
+fn negative_graded_activation_inverts_polarity() {
+    // Excitatory 0 → 1 (delay 0) at −0.5 delivers −0.375, not +0.375.
+    let mut mesh = fixture();
+    let t0 = mesh.propagate_graded(&[-0.5, 0.0, 0.0, 0.0]).unwrap();
+    assert_currents(0, &t0, [0.0, -0.375, 0.0, 0.0]);
+
+    // Symmetrically, inhibitory neuron 2 turns excitatory:
+    // −0.60 × −0.5 = +0.30 on neuron 3, one tick later.
+    let mut mesh = fixture();
+    let t0 = mesh.propagate_graded(&[0.0, 0.0, -0.5, 0.0]).unwrap();
+    assert_currents(0, &t0, [0.0; N]);
+    let t1 = mesh.propagate_graded(&[0.0; N]).unwrap();
+    assert_currents(1, &t1, [0.0, 0.0, 0.0, 0.30]);
 }
 
 /// Guard rails a consumer can rely on: the spike vector must match the
