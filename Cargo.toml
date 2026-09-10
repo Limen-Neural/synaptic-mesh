@@ -12,8 +12,8 @@ documentation = "https://docs.rs/synaptic-mesh"
 readme = "README.md"
 keywords = ["snn", "neuromorphic", "routing", "lif", "spikenaut"]
 categories = ["science", "algorithms", "simulation"]
-# Dev tooling and repo-only assets a crates.io consumer never needs. The
-# packaged file list is asserted in CI (`cargo package --locked`).
+# Dev tooling and repo-only assets a crates.io consumer never needs.
+# Verify with `cargo package --locked --list` after touching this list.
 exclude = ["/docs/", "/.github/", "/qodana.yaml", "/REVIEW.md"]
 
 [dependencies]
