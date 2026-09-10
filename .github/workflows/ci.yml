@@ -37,9 +37,12 @@ jobs:
           toolchain_ch=$(grep -m1 '^channel' rust-toolchain.toml | sed -E 's/.*"([^"]+)".*/\1/' | strip_cr)
           # Every `toolchain:` / `rust-version:` pin in this workflow must
           # match Cargo.toml, so a job added later (or a partial bump) cannot
-          # introduce a second, silently diverging Rust version.
-          ci_pins=$(grep -Eo '^[[:space:]]*(toolchain|rust-version):[[:space:]]*"?[0-9]+(\.[0-9]+)*"?' \
-            .github/workflows/ci.yml | strip_cr | sed -E 's/.*:[[:space:]]*"?([0-9.]+)"?$/\1/')
+          # introduce a second, silently diverging Rust version. Values are
+          # captured verbatim — `nightly`, `stable`, or `${{ matrix.rust }}`
+          # is a mismatch, not something to skip over.
+          ci_pins=$(grep -E '^[[:space:]]*(toolchain|rust-version):[[:space:]]*[^[:space:]]' \
+            .github/workflows/ci.yml | strip_cr \
+            | sed -E "s/^[[:space:]]*(toolchain|rust-version):[[:space:]]*//; s/[[:space:]]+\$//; s/^[\"'](.*)[\"']\$/\1/")
           if [ -z "$ci_pins" ]; then
             echo "ERROR: no toolchain:/rust-version: pin found in .github/workflows/ci.yml" >&2
             exit 1
@@ -143,6 +146,15 @@ jobs:
             echo "$unexpected" | sed 's/^/  /' >&2
             exit 1
           fi
+          # The mirror image: an over-eager `exclude` (or a renamed file)
+          # must not silently drop something consumers rely on.
+          for required in Cargo.toml README.md CHANGELOG.md LICENSE-MIT \
+            LICENSE-APACHE-2.0 src/lib.rs; do
+            if ! grep -qxF "$required" "$listing"; then
+              echo "ERROR: $required is missing from the packaged crate" >&2
+              exit 1
+            fi
+          done
 
       - name: Package the crate
         run: cargo package --locked
@@ -156,8 +168,17 @@ jobs:
           set -euo pipefail
           msrv=$(grep -m1 '^rust-version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
           version=$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
+          if [ -z "$msrv" ] || [ -z "$version" ]; then
+            echo "ERROR: could not read rust-version/version from Cargo.toml" >&2
+            exit 1
+          fi
+          rustup toolchain list | grep -q "^${msrv}-" \
+            || rustup toolchain install "$msrv" --profile minimal --no-self-update
+          # Exact filename, not a glob: a restored cache can leave an older
+          # .crate in target/package/ that tar would treat as a member path.
+          crate="target/package/synaptic-mesh-${version}.crate"
           work=$(mktemp -d)
-          tar -xzf "target/package/synaptic-mesh-${version}.crate" -C "$work"
+          tar -xzf "$crate" -C "$work"
           cd "$work/synaptic-mesh-${version}"
           cargo "+$msrv" check --locked --all-targets
 
