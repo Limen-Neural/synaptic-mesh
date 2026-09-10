@@ -7,10 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.0] - 2026-09-10
-
-First crates.io release. Packaging, docs, and the propagate contract are
-aimed at general SNN users depending on the crate without any Limen context.
+Everything below ships as **0.3.0**, the first crates.io release: packaging,
+docs, and the propagate contract aimed at general SNN users depending on the
+crate without any Limen context. Issue #37 promotes this section to
+`## [0.3.0] - <publish date>` when it cuts the tag.
 
 ### Added
 
@@ -47,8 +47,8 @@ aimed at general SNN users depending on the crate without any Limen context.
   `rust-version:` pin in `.github/workflows/ci.yml` against `Cargo.toml`,
   instead of only the first toolchain install, so a partially bumped or
   newly added job fails the check (issue #51).
-- **Version**: bumped to **0.3.0**, the first version published to crates.io
-  (issue #34).
+- **Version**: bumped to **0.3.0**, the version prepared for the first
+  crates.io publish (issue #34; the publish itself is issue #37).
 - **Metadata**: crates.io keywords are now `snn`, `spiking`, `neuromorphic`,
   `topology`, `routing` — `lif` (no neuron models live here) and `spikenaut`
   (a downstream consumer, not a description of the crate) were dropped
@@ -63,8 +63,6 @@ aimed at general SNN users depending on the crate without any Limen context.
   alternative, and describes 0.3.0 as experimental pre-1.0. Repo-relative
   logo and `REVIEW.md` links are absolute so they resolve on crates.io and
   docs.rs, where those files are not packaged (issue #34).
-
-[0.3.0]: https://github.com/Limen-Neural/synaptic-mesh/compare/v0.2.0...v0.3.0
 
 ## [0.2.0] - 2026-09-06
 
@@ -154,5 +152,5 @@ First versioned history. Nothing before this tag was published or tagged.
   derivable impls, redundant borrows).
 - Fixed `cargo fmt` formatting (module ordering, debug_assert wrapping).
 
-[Unreleased]: https://github.com/Limen-Neural/synaptic-mesh/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Limen-Neural/synaptic-mesh/compare/v0.2.0...HEAD
 [0.1.0]: https://github.com/Limen-Neural/synaptic-mesh/releases/tag/v0.1.0
