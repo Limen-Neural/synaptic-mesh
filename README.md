@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="docs/logo.png" width="220" alt="synaptic-mesh">
+  <img src="https://raw.githubusercontent.com/Limen-Neural/synaptic-mesh/main/docs/logo.png" width="220" alt="synaptic-mesh">
 </p>
 
 <h1 align="center">synaptic-mesh</h1>
 <p align="center">SNN wiring, topology generation, and temporal delay infrastructure</p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.2.0-informational" alt="0.2.0 (not yet on crates.io)">
+  <img src="https://img.shields.io/badge/version-0.3.0-informational" alt="version 0.3.0">
   <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="MIT OR Apache-2.0">
 </p>
 
@@ -24,16 +24,26 @@
 
 ## Installation
 
-Not yet on crates.io. Until a crates.io release is available, depend on git:
+```toml
+[dependencies]
+synaptic-mesh = "0.3"
+```
+
+`0.3.0` is **experimental, pre-1.0**: the API is usable and tested, but minor
+releases may still contain breaking changes until 1.0. Pin an exact version
+(`= "0.3.0"`) if you need stability.
+
+For bleeding-edge changes that are not in a release yet, depend on git instead:
 
 ```toml
 synaptic-mesh = { git = "https://github.com/Limen-Neural/synaptic-mesh" }
 ```
 
-Pin to a released tag with `tag = "v0.2.0"` (see [releases](https://github.com/Limen-Neural/synaptic-mesh/releases) for the latest).
+Add `tag = "v0.3.0"` to pin a git dependency to a specific release instead of tracking `main` — see [releases](https://github.com/Limen-Neural/synaptic-mesh/releases) for the tags that exist today.
 
-See [REVIEW.md](REVIEW.md#build-profiles) for which cargo build profile
-(`dev`, `test`, `release`, `bench`) to use and why.
+Contributors: see
+[REVIEW.md](https://github.com/Limen-Neural/synaptic-mesh/blob/main/REVIEW.md#build-profiles)
+for which cargo build profile (`dev`, `test`, `release`, `bench`) to use and why.
 
 ## Quick Start: Building a Mesh
 
