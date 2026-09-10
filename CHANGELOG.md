@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **MSRV**: Rust pin raised from **1.97.1** to **1.98.1** in `Cargo.toml`
+  `rust-version`, `rust-toolchain.toml`, and CI (both the toolchain install
+  and the `cargo-deny` action) ahead of the first crates.io publish
+  (issue #51).
+- **CI**: the MSRV pin-agreement check now compares *every* `toolchain:` /
+  `rust-version:` pin in `.github/workflows/ci.yml` against `Cargo.toml`,
+  instead of only the first toolchain install, so a partially bumped or
+  newly added job fails the check (issue #51).
+
 ## [0.2.0] - 2026-09-06
 
 Bridges v0.1.0 (API solidify) and v0.3.0 (first crates.io publish). Hardens

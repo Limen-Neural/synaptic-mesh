@@ -22,10 +22,10 @@ jobs:
 
       # Keep Cargo.toml rust-version, rust-toolchain.toml channel, and this
       # job's toolchain: string identical (MSRV single source of truth — #35).
-      - name: Install Rust 1.97.1
+      - name: Install Rust 1.98.1
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.1
           components: clippy, rustfmt
 
       - name: Verify MSRV pins agree
@@ -35,34 +35,25 @@ jobs:
           strip_cr() { tr -d '\r'; }
           cargo_rv=$(grep -m1 '^rust-version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/' | strip_cr)
           toolchain_ch=$(grep -m1 '^channel' rust-toolchain.toml | sed -E 's/.*"([^"]+)".*/\1/' | strip_cr)
-          ci_rv=$(awk '
-            BEGIN { want = 0; in_rt = 0; lines = 0 }
-            {
-              sub(/\r$/, "")
-            }
-            /^[[:space:]]*- name:[[:space:]]*Install Rust/ { want = 1; next }
-            want && /uses: dtolnay\/rust-toolchain@/ { in_rt = 1; next }
-            in_rt && /^[[:space:]]*toolchain:[[:space:]]*/ {
-              sub(/^[[:space:]]*toolchain:[[:space:]]*/, "")
-              sub(/[[:space:]]*$/, "")
-              print
-              exit 0
-            }
-            want {
-              lines++
-              if (lines > 20) exit 1
-              if (/^[[:space:]]*- name:/) exit 1
-            }
-          ' .github/workflows/ci.yml) || true
-          if [ -z "${ci_rv:-}" ]; then
-            echo "ERROR: Failed to extract toolchain: from Install Rust step in .github/workflows/ci.yml" >&2
+          # Every `toolchain:` / `rust-version:` pin in this workflow must
+          # match Cargo.toml, so a job added later (or a partial bump) cannot
+          # introduce a second, silently diverging Rust version.
+          ci_pins=$(grep -Eo '^[[:space:]]*(toolchain|rust-version):[[:space:]]*"?[0-9]+(\.[0-9]+)*"?' \
+            .github/workflows/ci.yml | strip_cr | sed -E 's/.*:[[:space:]]*"?([0-9.]+)"?$/\1/')
+          if [ -z "$ci_pins" ]; then
+            echo "ERROR: no toolchain:/rust-version: pin found in .github/workflows/ci.yml" >&2
             exit 1
           fi
           echo "Cargo.toml rust-version=$cargo_rv"
           echo "rust-toolchain.toml channel=$toolchain_ch"
-          echo "ci.yml pin=$ci_rv"
-          if [ "$cargo_rv" != "$toolchain_ch" ] || [ "$cargo_rv" != "$ci_rv" ]; then
-            echo "ERROR: MSRV pins disagree (must be identical)." >&2
+          printf 'ci.yml pins:\n%s\n' "$(echo "$ci_pins" | sed 's/^/  /')"
+          agree=0
+          [ "$cargo_rv" = "$toolchain_ch" ] || agree=1
+          while read -r pin; do
+            [ "$pin" = "$cargo_rv" ] || agree=1
+          done <<< "$ci_pins"
+          if [ "$agree" -ne 0 ]; then
+            echo "ERROR: MSRV pins disagree (all must equal Cargo.toml rust-version=$cargo_rv)." >&2
             exit 1
           fi
 
@@ -119,4 +110,4 @@ jobs:
       - name: cargo-deny (advisories, licenses, bans, sources)
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
-          rust-version: "1.97.1"
+          rust-version: "1.98.1"
