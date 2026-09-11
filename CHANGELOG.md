@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Packaging**: `documentation = "https://docs.rs/synaptic-mesh"` and an
   explicit `readme = "README.md"` in `Cargo.toml` (issue #34).
+- **CI**: `package` job running `cargo package --locked`, asserting the
+  packaged file list against an allowlist of consumer-relevant files, and
+  building the unpacked `.crate` outside the repository so an over-eager
+  `exclude` or a repo-only build dependency fails CI instead of crates.io
+  (issue #36).
 
 ### Changed
 
