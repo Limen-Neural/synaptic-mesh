@@ -12,9 +12,22 @@ documentation = "https://docs.rs/synaptic-mesh"
 readme = "README.md"
 keywords = ["snn", "neuromorphic", "routing", "lif", "spikenaut"]
 categories = ["science", "algorithms", "simulation"]
-# Dev tooling and repo-only assets a crates.io consumer never needs.
-# Verify with `cargo package --locked --list` after touching this list.
-exclude = ["/docs/", "/.github/", "/qodana.yaml", "/REVIEW.md"]
+# Dev tooling and repo-only assets a crates.io consumer never needs, so the
+# published .crate is source + Cargo manifests + licenses + README +
+# CHANGELOG. Verify with `cargo package --locked --list` after touching this
+# list. See issues #34 and #49.
+exclude = [
+    "/docs/",
+    "/.github/",
+    "/qodana.yaml",
+    "/REVIEW.md",
+    "/.codacy.yml",
+    "/.devin/",
+    "/.gitignore",
+    "/AGENTS.md",
+    "/deny.toml",
+    "/rust-toolchain.toml",
+]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
