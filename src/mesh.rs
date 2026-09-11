@@ -59,6 +59,12 @@ impl SynapticMesh {
     /// Create a mesh with a custom maximum delay (overriding graph's max).
     ///
     /// Useful when you want headroom for future dynamic delay changes.
+    ///
+    /// `max_delay` must be at least `graph.max_delay()`. A smaller buffer
+    /// cannot represent the graph's longest delay: such a spike trips a
+    /// `debug_assert!` in debug builds and, in release builds, wraps around
+    /// the ring buffer to an earlier tick instead of being dropped. Use
+    /// [`SynapticMesh::new`] to size the buffer from the graph automatically.
     pub fn with_max_delay(graph: SynapticGraph, max_delay: usize) -> Self {
         let n = graph.neuron_count();
         Self {
@@ -80,6 +86,61 @@ impl SynapticMesh {
     /// Synaptic current vector of length `neuron_count()` — the total
     /// incoming current at each neuron for this tick (including delayed
     /// spikes from previous ticks).
+    ///
+    /// # Delivery contract
+    ///
+    /// 1. A spike from neuron `s` on tick `t` delivers current to every
+    ///    target of `s` on tick `t + delay`. A `delay` of 0 arrives in the
+    ///    return value of this very call. This assumes the delay buffer can
+    ///    hold the graph's delays, which [`SynapticMesh::new`] guarantees;
+    ///    see [`with_max_delay`] if you size it yourself.
+    /// 2. The magnitude is the synapse's weight and the sign is that
+    ///    synapse's [`Polarity`](crate::types::Polarity), so an inhibitory
+    ///    synapse subtracts. The generators assign polarity per source
+    ///    neuron (Dale's law), but [`SynapticGraph::from_descriptors`] takes
+    ///    each descriptor's polarity as given and does not check that one
+    ///    source's synapses agree.
+    ///
+    /// [`with_max_delay`]: Self::with_max_delay
+    /// [`SynapticGraph::from_descriptors`]: crate::topology::SynapticGraph::from_descriptors
+    /// 3. Currents arriving at the same neuron on the same tick are summed.
+    /// 4. Propagation is **one hop**: received current never becomes a spike
+    ///    by itself. You own the neuron model — threshold the returned
+    ///    currents and feed the result into the next call to build a
+    ///    multi-layer loop.
+    /// 5. Delivery is deterministic: the same graph and the same spike
+    ///    sequence produce the same currents, including after [`reset`].
+    ///
+    /// [`reset`]: Self::reset
+    ///
+    /// ```rust
+    /// use synaptic_mesh::mesh::SynapticMesh;
+    /// use synaptic_mesh::topology::SynapticGraph;
+    /// use synaptic_mesh::types::{Polarity, SynapseDescriptor};
+    ///
+    /// // 0 ──(w=0.75, delay 0, excitatory)──▶ 1
+    /// // 0 ──(w=0.50, delay 2, excitatory)──▶ 2
+    /// let graph = SynapticGraph::from_descriptors(
+    ///     3,
+    ///     &[
+    ///         SynapseDescriptor { source: 0, target: 1, weight: 0.75, delay: 0, polarity: Polarity::Excitatory },
+    ///         SynapseDescriptor { source: 0, target: 2, weight: 0.50, delay: 2, polarity: Polarity::Excitatory },
+    ///     ],
+    /// )?;
+    /// let mut mesh = SynapticMesh::new(graph);
+    ///
+    /// // Tick 0: neuron 0 fires — only the delay-0 synapse lands.
+    /// assert_eq!(mesh.propagate(&[true, false, false])?, vec![0.0, 0.75, 0.0]);
+    /// // Tick 1: nothing in flight arrives yet.
+    /// assert_eq!(mesh.propagate(&[false; 3])?, vec![0.0, 0.0, 0.0]);
+    /// // Tick 2: the delay-2 synapse arrives at neuron 2.
+    /// assert_eq!(mesh.propagate(&[false; 3])?, vec![0.0, 0.0, 0.50]);
+    /// # Ok::<(), synaptic_mesh::MeshError>(())
+    /// ```
+    ///
+    /// `tests/propagate_contract.rs` pins this contract — destination, sign,
+    /// magnitude, and delivery tick — against a fixed four-neuron graph, and
+    /// is a copyable starting point for your own simulation loop.
     pub fn propagate(&mut self, source_spikes: &[bool]) -> Result<Vec<f32>> {
         let n = self.graph.neuron_count();
         if source_spikes.len() != n {

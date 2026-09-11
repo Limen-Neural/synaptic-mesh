@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Packaging**: `documentation = "https://docs.rs/synaptic-mesh"` and an
   explicit `readme = "README.md"` in `Cargo.toml` (issue #34).
+- **Tests**: `tests/propagate_contract.rs` — deterministic consumer contract
+  for `SynapticMesh::propagate` over a fixed four-neuron graph, asserting the
+  destination, sign, magnitude, and delivery tick of every spike, plus
+  co-arrival summing, one-hop semantics, and replay after `reset()`
+  (issue #52).
+- **Docs**: `SynapticMesh::propagate` rustdoc now states the delivery
+  contract explicitly and carries a runnable minimal example (issue #52).
 - **CI**: `package` job running `cargo package --locked`, asserting the
   packaged file list against an allowlist of consumer-relevant files, and
   building the unpacked `.crate` outside the repository so an over-eager
