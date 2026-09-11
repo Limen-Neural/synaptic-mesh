@@ -204,35 +204,45 @@ impl<const N: usize> SparseSynapticMap<N> {
     ) -> Result<()> {
         let _ = index_as_u16::<N>(row, "row")?;
         let col_u16 = index_as_u16::<N>(col, "column")?;
-        let start = self.row_ptr[row];
-        let end = self.row_ptr[row + 1];
-
-        // Search for existing connection
-        for i in start..end {
-            if self.col_indices[i] as usize == col {
-                if weight.abs() > sparsity_threshold {
-                    self.values[i] = weight;
-                } else {
-                    // Remove: shift everything after
-                    self.col_indices.remove(i);
-                    self.values.remove(i);
-                    for r in (row + 1)..=N {
-                        self.row_ptr[r] -= 1;
-                    }
-                }
-                return Ok(());
-            }
+        if let Some(i) = self.find_connection(row, col) {
+            self.update_or_remove(i, row, weight, sparsity_threshold);
+            return Ok(());
         }
-
-        // Add new connection if significant
         if weight.abs() > sparsity_threshold {
-            self.col_indices.insert(end, col_u16);
-            self.values.insert(end, weight);
-            for r in (row + 1)..=N {
-                self.row_ptr[r] += 1;
-            }
+            self.insert_connection(row, col_u16, weight);
         }
         Ok(())
+    }
+
+    fn find_connection(&self, row: usize, col: usize) -> Option<usize> {
+        let start = self.row_ptr[row];
+        let end = self.row_ptr[row + 1];
+        (start..end).find(|&i| self.col_indices[i] as usize == col)
+    }
+
+    fn update_or_remove(&mut self, index: usize, row: usize, weight: f32, sparsity_threshold: f32) {
+        if weight.abs() > sparsity_threshold {
+            self.values[index] = weight;
+            return;
+        }
+        self.col_indices.remove(index);
+        self.values.remove(index);
+        self.shift_row_ptr(row, -1);
+    }
+
+    fn insert_connection(&mut self, row: usize, col: u16, weight: f32) {
+        let end = self.row_ptr[row + 1];
+        self.col_indices.insert(end, col);
+        self.values.insert(end, weight);
+        self.shift_row_ptr(row, 1);
+    }
+
+    fn shift_row_ptr(&mut self, row: usize, delta: isize) {
+        for ptr in &mut self.row_ptr[(row + 1)..=N] {
+            *ptr = ptr
+                .checked_add_signed(delta)
+                .expect("row_ptr stays in range");
+        }
     }
 
     /// Number of non-zero synapses.
@@ -241,8 +251,11 @@ impl<const N: usize> SparseSynapticMap<N> {
     }
 
     /// Sparsity ratio: fraction of zero entries in the full $N \times N$ matrix.
+    ///
+    /// The denominator is computed in `u64` so `N = 65_536` does not overflow
+    /// `usize` on 32-bit targets (`65_536² = 2³²`).
     pub fn sparsity(&self) -> f32 {
-        let total = N * N;
+        let total = (N as u64).saturating_mul(N as u64);
         if total == 0 {
             return 1.0;
         }
@@ -583,12 +596,13 @@ mod tests {
 
     #[test]
     fn highest_representable_target_is_accepted() {
-        let mut map = SparseSynapticMap::<2>::new();
-        map.try_set_weight(0, 1, 1.0, 0.0).unwrap();
-        assert!((map.get_weight(0, 1) - 1.0).abs() < 1e-6);
-        let (row_ptr, cols, values) = map.try_to_gpu_arrays().unwrap();
-        assert_eq!(row_ptr, vec![0, 1, 1]);
-        assert_eq!(cols, vec![1]);
+        // N = 65_536 allocates only the CSR row_ptr (~512 KiB), not an N×N matrix.
+        let mut map = SparseSynapticMap::<65_536>::try_new().unwrap();
+        map.try_set_weight(0, 65_535, 1.0, 0.0).unwrap();
+        assert!((map.get_weight(0, 65_535) - 1.0).abs() < 1e-6);
+        assert!((map.sparsity() - 1.0).abs() < 1e-6);
+        let (_row_ptr, cols, values) = map.try_to_gpu_arrays().unwrap();
+        assert_eq!(cols, vec![65_535]);
         assert!((values[0] - 1.0).abs() < 1e-6);
     }
 
@@ -600,9 +614,14 @@ mod tests {
     }
 
     #[test]
-    fn usizes_to_u32_rejects_unrepresentable_offset() {
-        let too_big = (u32::MAX as usize).saturating_add(1);
-        assert!(usizes_to_u32(&[0, too_big]).is_err());
+    fn usizes_to_u32_accepts_u32_max() {
         assert_eq!(usizes_to_u32(&[0, u32::MAX as usize]).unwrap().len(), 2);
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn usizes_to_u32_rejects_unrepresentable_offset() {
+        let too_big = (u32::MAX as usize) + 1;
+        assert!(usizes_to_u32(&[0, too_big]).is_err());
     }
 }
