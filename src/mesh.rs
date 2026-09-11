@@ -198,7 +198,9 @@ impl SynapticMesh {
     ///
     /// * `source_activations` — activation level for each neuron.
     ///   Non-zero values are treated as spikes; the activation value
-    ///   scales the synaptic weight.
+    ///   scales the synaptic weight. Finite **signed** activations are
+    ///   allowed (a negative activation inverts the delivered current).
+    ///   NaN and ±infinity are rejected before any buffer or tick mutation.
     pub fn propagate_graded(&mut self, source_activations: &[f32]) -> Result<Vec<f32>> {
         let n = self.graph.neuron_count();
         if source_activations.len() != n {
@@ -207,6 +209,16 @@ impl SynapticMesh {
                 got: source_activations.len(),
                 context: "propagate_graded source_activations".into(),
             });
+        }
+
+        if let Some((index, &activation)) = source_activations
+            .iter()
+            .enumerate()
+            .find(|(_, a)| !a.is_finite())
+        {
+            return Err(MeshError::InvalidConfig(format!(
+                "propagate_graded source_activations[{index}] must be finite, got {activation}"
+            )));
         }
 
         for (src, &activation) in source_activations.iter().enumerate() {
@@ -401,6 +413,93 @@ mod tests {
         // Tick 2: spike arrives
         let c2 = mesh.propagate(&spikes).unwrap();
         assert!((c2[1] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn propagate_graded_rejects_non_finite_before_mutation() {
+        use crate::types::{Polarity, SynapseDescriptor};
+        let graph = SynapticGraph::from_descriptors(
+            2,
+            &[SynapseDescriptor {
+                source: 0,
+                target: 1,
+                weight: 1.0,
+                delay: 2,
+                polarity: Polarity::Excitatory,
+            }],
+        )
+        .unwrap();
+        let mut mesh = SynapticMesh::new(graph);
+
+        // Put a spike in flight so we can detect a partial tick advance.
+        mesh.propagate(&[true, false]).unwrap();
+        assert_eq!(mesh.tick(), 1);
+
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let err = mesh.propagate_graded(&[0.0, bad]).unwrap_err();
+            assert!(
+                err.to_string().contains("must be finite"),
+                "unexpected error for {bad}: {err}"
+            );
+            assert_eq!(mesh.tick(), 1, "tick must not advance on rejection");
+        }
+
+        // In-flight delay-2 current must still arrive two ticks after inject
+        // (tick 2 of the mesh), proving the failed graded calls did not drain.
+        assert_eq!(mesh.propagate(&[false, false]).unwrap()[1], 0.0);
+        let arrived = mesh.propagate(&[false, false]).unwrap();
+        assert!((arrived[1] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn propagate_graded_prevalidates_later_elements() {
+        use crate::types::{Polarity, SynapseDescriptor};
+        let graph = SynapticGraph::from_descriptors(
+            3,
+            &[
+                SynapseDescriptor {
+                    source: 0,
+                    target: 1,
+                    weight: 1.0,
+                    delay: 0,
+                    polarity: Polarity::Excitatory,
+                },
+                SynapseDescriptor {
+                    source: 2,
+                    target: 1,
+                    weight: 1.0,
+                    delay: 0,
+                    polarity: Polarity::Excitatory,
+                },
+            ],
+        )
+        .unwrap();
+        let mut mesh = SynapticMesh::new(graph);
+        // A valid first element must not be injected if a later one is NaN.
+        assert!(mesh.propagate_graded(&[1.0, 0.0, f32::NAN]).is_err());
+        assert_eq!(mesh.tick(), 0);
+        let currents = mesh.propagate(&[false, false, false]).unwrap();
+        assert!(currents.iter().all(|&c| c == 0.0));
+    }
+
+    #[test]
+    fn propagate_graded_preserves_signed_finite_activations() {
+        use crate::types::{Polarity, SynapseDescriptor};
+        let graph = SynapticGraph::from_descriptors(
+            2,
+            &[SynapseDescriptor {
+                source: 0,
+                target: 1,
+                weight: 0.5,
+                delay: 0,
+                polarity: Polarity::Inhibitory,
+            }],
+        )
+        .unwrap();
+        let mut mesh = SynapticMesh::new(graph);
+        // Inhibitory weight is -0.5; a negative activation inverts it to +0.25.
+        let currents = mesh.propagate_graded(&[-0.5, 0.0]).unwrap();
+        assert!((currents[1] - 0.25).abs() < 1e-6);
     }
 
     #[test]

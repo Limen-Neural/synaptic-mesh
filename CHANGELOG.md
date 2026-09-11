@@ -60,6 +60,14 @@ crate without any Limen context. Issue #37 promotes this section to
   preferential sample, keeping the reciprocal-edge policy. Identical inputs
   remain deterministic, but the generated graphs **change** relative to
   0.2.x (issue #62).
+- **Validation**: `SynapticGraph::from_descriptors` now rejects negative,
+  NaN, and infinite descriptor magnitudes (including values constructed
+  as ordinary Rust structs that bypass serde). Graph deserialization
+  rejects signed weights that disagree with stored polarity, while
+  accepting IEEE signed zero for both polarities.
+  `propagate_graded` rejects non-finite activations before mutating the
+  delay buffer or tick counters. Invalid magnitudes are not silently
+  `abs()`-normalized (issue #61).
 
 ### Removed
 
