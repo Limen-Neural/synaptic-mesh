@@ -18,6 +18,7 @@
 //! The ring buffer has `max_delay + 1` slots, each slot is a vector of
 //! length `neuron_count` accumulating incoming synaptic current.
 
+use serde::de::{Deserializer, Error as DeError};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{MeshError, Result};
@@ -32,7 +33,12 @@ use crate::error::{MeshError, Result};
 /// With `max_delay == 0` the buffer holds a single slot and every spike is
 /// delivered in the same tick it is injected, behaving as if there were no
 /// delay layer — it still allocates that one slot, one `f32` per neuron.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+///
+/// Deserialization re-validates the ring invariants: depth is
+/// `max_delay + 1` (checked, nonzero), and every slot width equals
+/// `neuron_count`. Empty-neuron buffers (`neuron_count == 0`) remain
+/// legal when each slot is an empty vector.
+#[derive(Clone, Debug, Serialize)]
 pub struct SpikeDelayBuffer {
     /// Ring buffer: `slots[slot_index][neuron_id]` → accumulated current.
     slots: Vec<Vec<f32>>,
@@ -42,6 +48,67 @@ pub struct SpikeDelayBuffer {
     max_delay: usize,
     /// Current simulation tick.
     current_tick: u64,
+}
+
+#[derive(Deserialize)]
+struct RawSpikeDelayBuffer {
+    slots: Vec<Vec<f32>>,
+    neuron_count: usize,
+    max_delay: usize,
+    current_tick: u64,
+}
+
+impl RawSpikeDelayBuffer {
+    fn into_buffer(self) -> std::result::Result<SpikeDelayBuffer, String> {
+        validate_delay_buffer_shape(&self.slots, self.neuron_count, self.max_delay)?;
+        Ok(SpikeDelayBuffer {
+            slots: self.slots,
+            neuron_count: self.neuron_count,
+            max_delay: self.max_delay,
+            current_tick: self.current_tick,
+        })
+    }
+}
+
+/// Ring depth must be `max_delay + 1` (nonzero, no overflow) and every
+/// slot must have width `neuron_count`.
+fn validate_delay_buffer_shape(
+    slots: &[Vec<f32>],
+    neuron_count: usize,
+    max_delay: usize,
+) -> std::result::Result<(), String> {
+    let expected_depth = max_delay.checked_add(1).ok_or_else(|| {
+        format!("max_delay {max_delay} + 1 overflows usize; delay buffer depth is invalid")
+    })?;
+    if slots.is_empty() {
+        return Err("delay buffer slots must be non-empty".into());
+    }
+    if slots.len() != expected_depth {
+        return Err(format!(
+            "delay buffer depth {} does not match max_delay + 1 ({expected_depth})",
+            slots.len()
+        ));
+    }
+    for (i, slot) in slots.iter().enumerate() {
+        if slot.len() != neuron_count {
+            return Err(format!(
+                "delay buffer slot {i} width {} does not match neuron_count {neuron_count}",
+                slot.len()
+            ));
+        }
+    }
+    Ok(())
+}
+
+impl<'de> Deserialize<'de> for SpikeDelayBuffer {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        RawSpikeDelayBuffer::deserialize(deserializer)?
+            .into_buffer()
+            .map_err(DeError::custom)
+    }
 }
 
 impl SpikeDelayBuffer {
@@ -340,21 +407,55 @@ mod tests {
     }
 
     #[test]
-    fn try_inject_rejects_delay_that_exceeds_deserialized_depth() {
-        // Derived Deserialize still accepts slots.len() < max_delay + 1.
-        // A delay within max_delay must not wrap through modulo onto an
-        // earlier tick.
-        let json = r#"{"slots":[[0.0]],"neuron_count":1,"max_delay":1,"current_tick":0}"#;
-        let mut buf: SpikeDelayBuffer = serde_json::from_str(json).unwrap();
-        assert!(buf.try_inject(0, 1.0, 1).is_err());
-        let currents = buf.drain_current_tick();
-        assert_eq!(currents[0], 0.0);
-    }
-
-    #[test]
     #[should_panic(expected = "overflow")]
     fn new_rejects_max_delay_plus_one_overflow() {
         let _ = SpikeDelayBuffer::new(1, usize::MAX);
+    }
+
+    #[test]
+    fn deserialize_rejects_empty_slots() {
+        let json = r#"{"slots":[],"neuron_count":2,"max_delay":1,"current_tick":0}"#;
+        assert!(serde_json::from_str::<SpikeDelayBuffer>(json).is_err());
+    }
+
+    #[test]
+    fn deserialize_rejects_wrong_depth() {
+        let json = r#"{"slots":[[0.0,0.0]],"neuron_count":2,"max_delay":1,"current_tick":0}"#;
+        assert!(serde_json::from_str::<SpikeDelayBuffer>(json).is_err());
+    }
+
+    #[test]
+    fn deserialize_rejects_ragged_slot_widths() {
+        let json = r#"{"slots":[[0.0,0.0],[0.0]],"neuron_count":2,"max_delay":1,"current_tick":0}"#;
+        assert!(serde_json::from_str::<SpikeDelayBuffer>(json).is_err());
+    }
+
+    #[test]
+    fn deserialize_rejects_max_delay_plus_one_overflow() {
+        let json =
+            r#"{"slots":[],"neuron_count":1,"max_delay":18446744073709551615,"current_tick":0}"#;
+        assert!(serde_json::from_str::<SpikeDelayBuffer>(json).is_err());
+        assert!(validate_delay_buffer_shape(&[], 1, usize::MAX).is_err());
+    }
+
+    #[test]
+    fn deserialize_accepts_zero_neuron_and_zero_delay() {
+        let json = r#"{"slots":[[]],"neuron_count":0,"max_delay":0,"current_tick":0}"#;
+        let buf: SpikeDelayBuffer = serde_json::from_str(json).unwrap();
+        assert_eq!(buf.neuron_count(), 0);
+        assert_eq!(buf.max_delay(), 0);
+    }
+
+    #[test]
+    fn serialize_roundtrip_preserves_in_flight_current() {
+        let mut buf = SpikeDelayBuffer::new(2, 1);
+        buf.inject(1, 0.5, 1);
+        let json = serde_json::to_string(&buf).unwrap();
+        let mut restored: SpikeDelayBuffer = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.current_tick(), 0);
+        assert_eq!(restored.drain_current_tick()[1], 0.0);
+        restored.advance();
+        assert!((restored.drain_current_tick()[1] - 0.5).abs() < 1e-6);
     }
 
     #[test]

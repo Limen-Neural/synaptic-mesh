@@ -72,6 +72,12 @@ crate without any Limen context. Issue #37 promotes this section to
   magnitudes in release builds so a struct-literal negative inhibitory
   weight cannot flip sign. Invalid magnitudes are not silently
   `abs()`-normalized (issue #61).
+- **Serde checkpoints**: `SpikeDelayBuffer` and `SynapticMesh` now reject
+  structurally inconsistent payloads at deserialize time (empty/wrong-depth
+  rings, ragged slot widths, `max_delay + 1` overflow, graph/buffer count
+  mismatch, inadequate delay capacity, tick mismatch) instead of panicking
+  or delivering currents on the wrong tick later (issue #64). Valid
+  existing checkpoint JSON is unchanged.
 
 ### Removed
 
