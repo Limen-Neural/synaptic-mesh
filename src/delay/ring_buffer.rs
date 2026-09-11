@@ -27,8 +27,9 @@ use serde::{Deserialize, Serialize};
 /// 2. Call [`SpikeDelayBuffer::drain_current_tick`] to collect all currents that have arrived.
 /// 3. Call [`SpikeDelayBuffer::advance`] to move the tick forward.
 ///
-/// The buffer is zero-cost when `max_delay == 0`: every spike is delivered
-/// in the same tick it is injected, as if there were no delay layer at all.
+/// With `max_delay == 0` the buffer holds a single slot and every spike is
+/// delivered in the same tick it is injected, behaving as if there were no
+/// delay layer — it still allocates that one slot, one `f32` per neuron.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SpikeDelayBuffer {
     /// Ring buffer: `slots[slot_index][neuron_id]` → accumulated current.
