@@ -152,7 +152,8 @@ pub use router::{ChannelRouter, NeuromodNeuron, NeuromodState, RouterConfig, Rou
 
 // Sparse map exports
 pub use sparse::{
-    NeuronStateSnapshot, RoutingPolicy, SparseSynapticMap, SparseSynapticMapBuilder, Synapse,
+    MAX_SPARSE_NEURONS, NeuronStateSnapshot, RoutingPolicy, SparseSynapticMap,
+    SparseSynapticMapBuilder, Synapse,
 };
 
 #[cfg(test)]
