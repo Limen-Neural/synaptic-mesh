@@ -47,7 +47,7 @@ impl SynapticMesh {
     ///
     /// The delay buffer is sized to the graph's maximum delay.
     pub fn new(graph: SynapticGraph) -> Self {
-        let max_delay = graph.max_delay() as usize;
+        let max_delay = usize::from(graph.max_delay());
         let n = graph.neuron_count();
         Self {
             delay_buffer: SpikeDelayBuffer::new(n, max_delay),
@@ -61,17 +61,36 @@ impl SynapticMesh {
     /// Useful when you want headroom for future dynamic delay changes.
     ///
     /// `max_delay` must be at least `graph.max_delay()`. A smaller buffer
-    /// cannot represent the graph's longest delay: such a spike trips a
-    /// `debug_assert!` in debug builds and, in release builds, wraps around
-    /// the ring buffer to an earlier tick instead of being dropped. Use
-    /// [`SynapticMesh::new`] to size the buffer from the graph automatically.
+    /// is rejected at construction — before any `propagate` call — rather
+    /// than wrapping an oversized delay onto an earlier tick. Use
+    /// [`SynapticMesh::new`] to size the buffer from the graph automatically,
+    /// or [`SynapticMesh::try_with_max_delay`] for a recoverable error.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `max_delay` is smaller than the graph's maximum delay, or
+    /// if `max_delay + 1` overflows `usize`.
     pub fn with_max_delay(graph: SynapticGraph, max_delay: usize) -> Self {
+        Self::try_with_max_delay(graph, max_delay).unwrap_or_else(|err| panic!("{err}"))
+    }
+
+    /// Fallible counterpart of [`SynapticMesh::with_max_delay`].
+    ///
+    /// Returns [`MeshError::DelayError`] when `max_delay` cannot hold every
+    /// synapse delay in `graph`, or when the ring depth would overflow.
+    pub fn try_with_max_delay(graph: SynapticGraph, max_delay: usize) -> Result<Self> {
+        let graph_max = usize::from(graph.max_delay());
+        if max_delay < graph_max {
+            return Err(MeshError::DelayError(format!(
+                "max_delay {max_delay} is smaller than the graph's maximum delay {graph_max}"
+            )));
+        }
         let n = graph.neuron_count();
-        Self {
-            delay_buffer: SpikeDelayBuffer::new(n, max_delay),
+        Ok(Self {
+            delay_buffer: SpikeDelayBuffer::try_new(n, max_delay)?,
             graph,
             tick: 0,
-        }
+        })
     }
 
     /// Propagate spikes through the mesh for one tick.
@@ -92,8 +111,9 @@ impl SynapticMesh {
     /// 1. A spike from neuron `s` on tick `t` delivers current to every
     ///    target of `s` on tick `t + delay`. A `delay` of 0 arrives in the
     ///    return value of this very call. This assumes the delay buffer can
-    ///    hold the graph's delays, which [`SynapticMesh::new`] guarantees;
-    ///    see [`with_max_delay`] if you size it yourself.
+    ///    hold the graph's delays, which [`SynapticMesh::new`] guarantees.
+    ///    [`with_max_delay`] rejects a buffer smaller than the graph's
+    ///    longest delay at construction (debug and release).
     /// 2. The magnitude is the synapse's weight and the sign is that
     ///    synapse's [`Polarity`](crate::types::Polarity), so an inhibitory
     ///    synapse subtracts. The generators assign polarity per source
@@ -257,6 +277,65 @@ impl SynapticMesh {
 mod tests {
     use super::*;
     use crate::topology::{generate_layered, generate_random, generate_small_world};
+
+    #[test]
+    fn try_with_max_delay_rejects_insufficient_capacity() {
+        use crate::types::{Polarity, SynapseDescriptor};
+        let graph = SynapticGraph::from_descriptors(
+            2,
+            &[SynapseDescriptor {
+                source: 0,
+                target: 1,
+                weight: 1.0,
+                delay: 2,
+                polarity: Polarity::Excitatory,
+            }],
+        )
+        .unwrap();
+        let err = SynapticMesh::try_with_max_delay(graph, 1).unwrap_err();
+        assert!(
+            err.to_string().contains("smaller than the graph"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "smaller than the graph")]
+    fn with_max_delay_rejects_insufficient_capacity() {
+        use crate::types::{Polarity, SynapseDescriptor};
+        let graph = SynapticGraph::from_descriptors(
+            2,
+            &[SynapseDescriptor {
+                source: 0,
+                target: 1,
+                weight: 1.0,
+                delay: 2,
+                polarity: Polarity::Excitatory,
+            }],
+        )
+        .unwrap();
+        let _ = SynapticMesh::with_max_delay(graph, 1);
+    }
+
+    #[test]
+    fn with_max_delay_accepts_equal_and_larger_capacity() {
+        use crate::types::{Polarity, SynapseDescriptor};
+        let graph = SynapticGraph::from_descriptors(
+            2,
+            &[SynapseDescriptor {
+                source: 0,
+                target: 1,
+                weight: 1.0,
+                delay: 2,
+                polarity: Polarity::Excitatory,
+            }],
+        )
+        .unwrap();
+        let equal = SynapticMesh::try_with_max_delay(graph.clone(), 2).unwrap();
+        assert_eq!(equal.max_delay(), 2);
+        let larger = SynapticMesh::with_max_delay(graph, 5);
+        assert_eq!(larger.max_delay(), 5);
+    }
 
     #[test]
     fn propagate_length_mismatch_rejected() {

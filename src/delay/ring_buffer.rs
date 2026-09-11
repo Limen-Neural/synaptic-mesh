@@ -20,6 +20,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::{MeshError, Result};
+
 /// Ring-buffer delay queue for spike delivery.
 ///
 /// At each simulation tick:
@@ -45,18 +47,38 @@ pub struct SpikeDelayBuffer {
 impl SpikeDelayBuffer {
     /// Create a new delay buffer.
     ///
+    /// The ring has `max_delay + 1` slots so a spike injected with
+    /// `delay == max_delay` lands on a future tick rather than wrapping
+    /// onto the current slot.
+    ///
     /// # Arguments
     ///
     /// * `neuron_count` — number of target neurons (slot width)
     /// * `max_delay` — maximum axonal delay in ticks
+    ///
+    /// # Panics
+    ///
+    /// Panics if `max_delay + 1` overflows `usize`. Prefer
+    /// [`SpikeDelayBuffer::try_new`] when the caller needs a recoverable
+    /// error.
     pub fn new(neuron_count: usize, max_delay: usize) -> Self {
-        let depth = max_delay + 1;
-        Self {
+        Self::try_new(neuron_count, max_delay).unwrap_or_else(|err| panic!("{err}"))
+    }
+
+    /// Fallible constructor that rejects a `max_delay` whose ring depth
+    /// (`max_delay + 1`) would overflow `usize`.
+    pub fn try_new(neuron_count: usize, max_delay: usize) -> Result<Self> {
+        let depth = max_delay.checked_add(1).ok_or_else(|| {
+            MeshError::DelayError(format!(
+                "max_delay {max_delay} + 1 overflows usize; cannot allocate a zero-depth buffer"
+            ))
+        })?;
+        Ok(Self {
             slots: vec![vec![0.0; neuron_count]; depth],
             neuron_count,
             max_delay,
             current_tick: 0,
-        }
+        })
     }
 
     /// Inject a spike from a source neuron through a synapse.
@@ -64,24 +86,46 @@ impl SpikeDelayBuffer {
     /// The synaptic current `weight` will be delivered to `target` neuron
     /// after `delay` ticks from the current tick.
     ///
+    /// Bounds are checked in **both** debug and release builds before any
+    /// slot is modified. An oversized delay is rejected rather than
+    /// wrapping onto an earlier tick via modulo arithmetic.
+    ///
     /// # Panics
     ///
-    /// Panics if `delay > max_delay` or `target >= neuron_count`.
+    /// Panics if `delay > max_delay` or `target >= neuron_count`. Prefer
+    /// [`SpikeDelayBuffer::try_inject`] when the caller needs a recoverable
+    /// error.
     #[inline]
     pub fn inject(&mut self, target: usize, weight: f32, delay: usize) {
-        debug_assert!(
-            delay <= self.max_delay,
-            "delay {delay} > max_delay {}",
-            self.max_delay
-        );
-        debug_assert!(
-            target < self.neuron_count,
-            "target {target} >= neuron_count {}",
-            self.neuron_count
-        );
+        self.try_inject(target, weight, delay)
+            .unwrap_or_else(|err| panic!("{err}"))
+    }
 
-        let slot_idx = (self.current_tick as usize + delay) % self.slots.len();
+    /// Fallible inject that leaves the buffer unchanged when `delay` or
+    /// `target` is out of range.
+    #[inline]
+    pub fn try_inject(&mut self, target: usize, weight: f32, delay: usize) -> Result<()> {
+        if delay > self.max_delay {
+            return Err(MeshError::DelayError(format!(
+                "delay {delay} exceeds max_delay {}",
+                self.max_delay
+            )));
+        }
+        if target >= self.neuron_count {
+            return Err(MeshError::IndexOutOfBounds {
+                index: target,
+                max: self.neuron_count.saturating_sub(1),
+            });
+        }
+        // Depth is `max_delay + 1` and constructors reject overflow, so
+        // the ring is never empty for a successfully constructed buffer.
+        let depth = self.slots.len();
+        if depth == 0 {
+            return Err(MeshError::DelayError("delay buffer has zero depth".into()));
+        }
+        let slot_idx = (self.current_tick as usize + delay) % depth;
         self.slots[slot_idx][target] += weight;
+        Ok(())
     }
 
     /// Drain the current tick's accumulated synaptic currents.
@@ -209,6 +253,71 @@ mod tests {
         assert_eq!(buf.current_tick(), 0);
         let currents = buf.drain_current_tick();
         assert!(currents.iter().all(|&v| v == 0.0));
+    }
+
+    #[test]
+    fn inject_delay_zero_is_accepted() {
+        let mut buffer = SpikeDelayBuffer::new(2, 1);
+        buffer.inject(1, 1.0, 0);
+        let currents = buffer.drain_current_tick();
+        assert!((currents[1] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn inject_delay_equal_to_capacity_is_accepted() {
+        let mut buffer = SpikeDelayBuffer::new(2, 1);
+        buffer.inject(0, 1.0, 1);
+        let c0 = buffer.drain_current_tick();
+        assert_eq!(c0[0], 0.0);
+        buffer.advance();
+        let c1 = buffer.drain_current_tick();
+        assert!((c1[0] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    #[should_panic(expected = "delay 2 exceeds max_delay 1")]
+    fn inject_excessive_delay_is_rejected() {
+        let mut buffer = SpikeDelayBuffer::new(2, 1);
+        buffer.inject(1, 1.0, 2);
+    }
+
+    #[test]
+    fn try_inject_excessive_delay_leaves_buffer_unchanged() {
+        let mut buffer = SpikeDelayBuffer::new(2, 1);
+        assert!(buffer.try_inject(1, 1.0, 2).is_err());
+        let currents = buffer.drain_current_tick();
+        assert!(currents.iter().all(|&c| c == 0.0));
+    }
+
+    #[test]
+    #[should_panic(expected = "out of bounds")]
+    fn inject_out_of_range_target_is_rejected() {
+        let mut buffer = SpikeDelayBuffer::new(2, 1);
+        buffer.inject(2, 1.0, 0);
+    }
+
+    #[test]
+    fn try_inject_out_of_range_target_leaves_buffer_unchanged() {
+        let mut buffer = SpikeDelayBuffer::new(2, 1);
+        assert!(buffer.try_inject(2, 1.0, 0).is_err());
+        let currents = buffer.drain_current_tick();
+        assert!(currents.iter().all(|&c| c == 0.0));
+    }
+
+    #[test]
+    fn try_new_rejects_max_delay_plus_one_overflow() {
+        let err = SpikeDelayBuffer::try_new(1, usize::MAX).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("overflow"),
+            "expected overflow error, got {msg}"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "overflow")]
+    fn new_rejects_max_delay_plus_one_overflow() {
+        let _ = SpikeDelayBuffer::new(1, usize::MAX);
     }
 
     #[test]

@@ -44,6 +44,13 @@ crate without any Limen context. Issue #37 promotes this section to
   cannot wrap to target `0`. `N` is capped at 65,536 neurons. `to_gpu_arrays`
   rejects `usize → u32` row-pointer overflow instead of truncating
   (issue #63). Additive `try_*` helpers leave the map unchanged on error.
+- **Delay buffer**: `SpikeDelayBuffer::inject` now checks delay and target
+  bounds in debug **and** release builds before writing a slot, so an
+  oversized delay cannot wrap onto an earlier tick. `try_new` /
+  `try_inject` reject `max_delay + 1` overflow and out-of-range inputs
+  without mutating the buffer. `SynapticMesh::with_max_delay` (and
+  additive `try_with_max_delay`) reject a buffer smaller than the graph's
+  maximum delay at construction (issue #60).
 
 ### Removed
 
@@ -62,6 +69,9 @@ crate without any Limen context. Issue #37 promotes this section to
   `rust-version:` pin in `.github/workflows/ci.yml` against `Cargo.toml`,
   instead of only the first toolchain install, so a partially bumped or
   newly added job fails the check (issue #51).
+- **CI**: `validate` now runs `cargo test --locked --release --all-features`
+  so delay-buffer capacity checks are exercised with `debug_assert!`
+  stripped (issue #60).
 - **Version**: bumped to **0.3.0**, the version prepared for the first
   crates.io publish (issue #34; the publish itself is issue #37).
 - **Metadata**: crates.io keywords are now `snn`, `spiking`, `neuromorphic`,
