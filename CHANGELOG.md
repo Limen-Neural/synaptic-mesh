@@ -56,8 +56,10 @@ crate without any Limen context. Issue #37 promotes this section to
 - **Packaging**: `exclude` now also drops `/.github/`, `/qodana.yaml`, and
   `/REVIEW.md` from the published `.crate` (issue #34), plus the remaining
   dev-tooling files `/.codacy.yml`, `/.devin/`, `/.gitignore`, `/AGENTS.md`,
-  `/deny.toml`, and `/rust-toolchain.toml` (issue #49). The packaged crate is
-  now source, Cargo manifests, licenses, README, and CHANGELOG only.
+  `/deny.toml`, and `/rust-toolchain.toml` (issue #49). The packaged crate
+  now holds only source, `Cargo.toml`, `Cargo.lock`, the licenses, README,
+  CHANGELOG, and the metadata cargo generates itself (`Cargo.toml.orig`,
+  `.cargo_vcs_info.json`).
 - **Docs**: README leads with the crates.io install path
   (`synaptic-mesh = "0.3"`), marks the git dependency as the bleeding-edge
   alternative, and describes 0.3.0 as experimental pre-1.0. Repo-relative
