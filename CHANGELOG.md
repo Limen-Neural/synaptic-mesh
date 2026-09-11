@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Everything below ships as **0.3.0**, the first crates.io release: packaging,
+docs, and the propagate contract aimed at general SNN users depending on the
+crate without any Limen context. Issue #37 promotes this section to
+`## [0.3.0] - <publish date>` when it cuts the tag.
+
 ### Added
 
 - **Packaging**: `documentation = "https://docs.rs/synaptic-mesh"` and an
@@ -18,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (issue #52).
 - **Docs**: `SynapticMesh::propagate` rustdoc now states the delivery
   contract explicitly and carries a runnable minimal example (issue #52).
+- **Docs**: README and crate-level docs are written for general SNN use —
+  what the crate is for, a "Where to start" map of the public API, the spike
+  delivery contract, an explicit scope boundary, and a "Used by" footnote
+  instead of downstream-specific framing (issue #53).
+- **Tests**: README Rust examples are compiled as doctests (`cfg(doctest)`
+  `include_str!`), so the quickstart cannot drift from the API (issue #53).
+- **CI**: the MSRV pin-agreement check also verifies the README's MSRV
+  line (issue #53).
 - **CI**: `package` job running `cargo package --locked`, asserting the
   packaged file list against an allowlist of consumer-relevant files, and
   building the unpacked `.crate` outside the repository so an over-eager
@@ -36,6 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   newly added job fails the check (issue #51).
 - **Version**: bumped to **0.3.0**, the version prepared for the first
   crates.io publish (issue #34; the publish itself is issue #37).
+- **Metadata**: crates.io keywords are now `snn`, `spiking`, `neuromorphic`,
+  `topology`, `routing` — `lif` (no neuron models live here) and `spikenaut`
+  (a downstream consumer, not a description of the crate) were dropped
+  (issue #53).
 - **Packaging**: `exclude` now also drops `/.github/`, `/qodana.yaml`, and
   `/REVIEW.md` from the published `.crate` (issue #34), plus the remaining
   dev-tooling files `/.codacy.yml`, `/.devin/`, `/.gitignore`, `/AGENTS.md`,

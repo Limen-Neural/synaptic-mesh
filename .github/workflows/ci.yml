@@ -47,11 +47,20 @@ jobs:
             echo "ERROR: no toolchain:/rust-version: pin found in .github/workflows/ci.yml" >&2
             exit 1
           fi
+          # README states the MSRV for crates.io readers (#53); keep it honest.
+          readme_rv=$(grep -m1 -oE 'MSRV[^0-9]*[0-9]+(\.[0-9]+)+' README.md \
+            | grep -oE '[0-9]+(\.[0-9]+)+' | strip_cr)
+          if [ -z "$readme_rv" ]; then
+            echo "ERROR: no 'MSRV ... <version>' line found in README.md" >&2
+            exit 1
+          fi
           echo "Cargo.toml rust-version=$cargo_rv"
           echo "rust-toolchain.toml channel=$toolchain_ch"
+          echo "README.md MSRV=$readme_rv"
           printf 'ci.yml pins:\n%s\n' "$(echo "$ci_pins" | sed 's/^/  /')"
           agree=0
           [ "$cargo_rv" = "$toolchain_ch" ] || agree=1
+          [ "$cargo_rv" = "$readme_rv" ] || agree=1
           while read -r pin; do
             [ "$pin" = "$cargo_rv" ] || agree=1
           done <<< "$ci_pins"
