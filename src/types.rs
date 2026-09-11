@@ -123,12 +123,15 @@ pub enum ConnectionModel {
     /// Distance-dependent: probability decays with Euclidean distance.
     /// `p(d) = p_max × exp(−d / lambda)`.
     DistanceDependent { p_max: f32, lambda: f32 },
-    /// Watts–Strogatz small-world: each neuron connected to `k` nearest
-    /// neighbours in a ring, then each edge rewired with probability `beta`.
+    /// Watts–Strogatz small-world: each neuron has `k` **outgoing** directed
+    /// synapses to its nearest ring neighbours (`k/2` clockwise, `k/2`
+    /// counterclockwise). `k` must be even. Each outgoing synapse is then
+    /// rewired with probability `beta` to a different non-self target.
     SmallWorld { k: usize, beta: f32 },
-    /// Barabási–Albert preferential attachment: start with `m0` connected
-    /// nodes, each new node attaches to `m` existing nodes proportional
-    /// to their degree.
+    /// Barabási–Albert preferential attachment: start with `m0` nodes that
+    /// are fully connected in both directions (`m0 * (m0 - 1)` directed
+    /// synapses). Each new node attaches to exactly `m` distinct older
+    /// nodes, and each attachment is stored as a reciprocal directed pair.
     ScaleFree { m0: usize, m: usize },
     /// Feed-forward layered: neurons arranged in layers, each layer
     /// fully connected to the next with given probability.

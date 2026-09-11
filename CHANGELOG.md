@@ -51,6 +51,12 @@ crate without any Limen context. Issue #37 promotes this section to
   without mutating the buffer. `SynapticMesh::with_max_delay` (and
   additive `try_with_max_delay`) reject a buffer smaller than the graph's
   maximum delay at construction (issue #60).
+- **Topology generators**: small-world now stores `k` directed outgoing
+  synapses per source (`k/2` on each side) and rejects odd `k` instead of
+  truncating. Scale-free growth attaches every new node to exactly `m`
+  distinct older nodes via a bounded preferential sample, keeping the
+  reciprocal-edge policy. Identical inputs remain deterministic, but the
+  generated graphs **change** relative to 0.2.x (issue #62).
 
 ### Removed
 
