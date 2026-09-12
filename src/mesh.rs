@@ -525,7 +525,11 @@ mod tests {
             err.to_string().contains("must be finite"),
             "unexpected error: {err}"
         );
-        assert_eq!(mesh.tick(), 1, "tick must not advance on overflow rejection");
+        assert_eq!(
+            mesh.tick(),
+            1,
+            "tick must not advance on overflow rejection"
+        );
 
         // A later overflowing product must not inject the earlier finite synapse.
         assert!(mesh.propagate_graded(&[1.0, 0.0, f32::MAX]).is_err());

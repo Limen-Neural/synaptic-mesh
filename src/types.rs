@@ -257,7 +257,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     #[should_panic(expected = "synapse weight must be finite and non-negative")]
     fn effective_weight_panics_on_negative_inhibitory_magnitude() {
         let desc = SynapseDescriptor {
