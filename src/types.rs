@@ -126,7 +126,8 @@ pub enum ConnectionModel {
     /// Watts–Strogatz small-world: each neuron has `k` **outgoing** directed
     /// synapses to its nearest ring neighbours (`k/2` clockwise, `k/2`
     /// counterclockwise). `k` must be even. Each outgoing synapse is then
-    /// rewired with probability `beta` to a different non-self target.
+    /// rewired with probability `beta` to a different non-self target when
+    /// one is available (a dense ring `k = n - 1` has none).
     SmallWorld { k: usize, beta: f32 },
     /// Barabási–Albert preferential attachment: start with `m0` nodes that
     /// are fully connected in both directions (`m0 * (m0 - 1)` directed

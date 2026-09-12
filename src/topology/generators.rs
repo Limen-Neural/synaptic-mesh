@@ -111,10 +111,11 @@ pub fn generate_random(
 /// Odd `k` is rejected rather than silently truncated by integer division.
 ///
 /// Then each outgoing synapse is rewired independently with probability
-/// `beta` to a different target. Rewiring never introduces a self-loop or
-/// a duplicate outgoing target, so a valid graph always has exactly
-/// `n * k` directed synapses (including `beta = 1` and a dense ring
-/// `k = n - 1` when that value is even).
+/// `beta` to a different non-self target when one is available. Rewiring
+/// never introduces a self-loop or a duplicate outgoing target, so a valid
+/// graph always has exactly `n * k` directed synapses (including `beta = 1`
+/// and a dense ring `k = n - 1` when that value is even; a dense ring has
+/// no unused target, so the original synapse is kept).
 ///
 /// **Changed graphs:** the previous implementation only stored the
 /// clockwise half of the lattice, so identical `(n, k, beta, …)` inputs
@@ -202,6 +203,7 @@ fn rewire_small_world_target(
 ) -> usize {
     let mut occupied = vec![false; n];
     occupied[src] = true;
+    occupied[replacing] = true;
     for &tgt in current_targets {
         if tgt != replacing {
             occupied[tgt] = true;
@@ -517,6 +519,31 @@ mod tests {
         assert_eq!(g.synapse_count(), 20);
         for src in 0..5 {
             assert_eq!(g.out_degree(src), 4);
+        }
+    }
+
+    #[test]
+    fn small_world_beta_1_rewires_every_non_dense_ring_slot() {
+        let n = 8;
+        let k = 4;
+        let half_k = k / 2;
+        let g = generate_small_world(n, k, 1.0, 1, 0.0).unwrap();
+        assert_eq!(g.synapse_count(), n * k);
+        for src in 0..n {
+            let mut original = Vec::with_capacity(k);
+            for offset in 1..=half_k {
+                original.push((src + offset) % n);
+                original.push((src + n - offset) % n);
+            }
+            let final_targets: Vec<usize> =
+                g.outgoing(src).map(|(t, _, _, _)| t as usize).collect();
+            assert_eq!(final_targets.len(), k, "src={src}");
+            for (slot, &tgt) in final_targets.iter().enumerate() {
+                assert_ne!(
+                    tgt, original[slot],
+                    "src={src} slot={slot} kept original ring target {tgt}"
+                );
+            }
         }
     }
 
