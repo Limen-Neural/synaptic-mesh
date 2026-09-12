@@ -112,9 +112,7 @@ fn validate_delay_buffer_shape(
 /// wrap on 32-bit targets when used as a ring index.
 fn validate_current_tick(current_tick: u64) -> std::result::Result<(), String> {
     if current_tick >= usize::MAX as u64 {
-        return Err(
-            "current_tick is too large for safe advancement and indexing".into(),
-        );
+        return Err("current_tick is too large for safe advancement and indexing".into());
     }
     Ok(())
 }
@@ -469,7 +467,8 @@ mod tests {
     #[cfg(target_pointer_width = "32")]
     #[test]
     fn deserialize_rejects_current_tick_that_wraps_usize() {
-        let json = r#"{"slots":[[0.0],[0.0]],"neuron_count":1,"max_delay":1,"current_tick":4294967296}"#;
+        let json =
+            r#"{"slots":[[0.0],[0.0]],"neuron_count":1,"max_delay":1,"current_tick":4294967296}"#;
         assert!(serde_json::from_str::<SpikeDelayBuffer>(json).is_err());
         assert!(validate_current_tick((usize::MAX as u64) + 1).is_err());
     }
