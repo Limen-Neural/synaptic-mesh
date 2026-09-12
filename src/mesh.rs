@@ -200,7 +200,8 @@ impl SynapticMesh {
     ///   Non-zero values are treated as spikes; the activation value
     ///   scales the synaptic weight. Finite **signed** activations are
     ///   allowed (a negative activation inverts the delivered current).
-    ///   NaN and ±infinity are rejected before any buffer or tick mutation.
+    ///   NaN, ±infinity, and non-finite `weight * activation` products are
+    ///   rejected before any buffer or tick mutation.
     pub fn propagate_graded(&mut self, source_activations: &[f32]) -> Result<Vec<f32>> {
         let n = self.graph.neuron_count();
         if source_activations.len() != n {
@@ -211,14 +212,23 @@ impl SynapticMesh {
             });
         }
 
-        if let Some((index, &activation)) = source_activations
-            .iter()
-            .enumerate()
-            .find(|(_, a)| !a.is_finite())
-        {
-            return Err(MeshError::InvalidConfig(format!(
-                "propagate_graded source_activations[{index}] must be finite, got {activation}"
-            )));
+        for (src, &activation) in source_activations.iter().enumerate() {
+            if !activation.is_finite() {
+                return Err(MeshError::InvalidConfig(format!(
+                    "propagate_graded source_activations[{src}] must be finite, got {activation}"
+                )));
+            }
+            if activation.abs() < 1e-9 {
+                continue;
+            }
+            for (_, weight, _, _) in self.graph.outgoing(src) {
+                let current = weight * activation;
+                if !current.is_finite() {
+                    return Err(MeshError::InvalidConfig(format!(
+                        "propagate_graded source_activations[{src}] * synapse weight must be finite, got {current}"
+                    )));
+                }
+            }
         }
 
         for (src, &activation) in source_activations.iter().enumerate() {
@@ -480,6 +490,54 @@ mod tests {
         assert_eq!(mesh.tick(), 0);
         let currents = mesh.propagate(&[false, false, false]).unwrap();
         assert!(currents.iter().all(|&c| c == 0.0));
+    }
+
+    #[test]
+    fn propagate_graded_rejects_non_finite_weight_activation_product() {
+        use crate::types::{Polarity, SynapseDescriptor};
+        let graph = SynapticGraph::from_descriptors(
+            3,
+            &[
+                SynapseDescriptor {
+                    source: 0,
+                    target: 1,
+                    weight: 1.0,
+                    delay: 2,
+                    polarity: Polarity::Excitatory,
+                },
+                SynapseDescriptor {
+                    source: 2,
+                    target: 1,
+                    weight: f32::MAX,
+                    delay: 0,
+                    polarity: Polarity::Excitatory,
+                },
+            ],
+        )
+        .unwrap();
+        let mut mesh = SynapticMesh::new(graph);
+
+        mesh.propagate(&[true, false, false]).unwrap();
+        assert_eq!(mesh.tick(), 1);
+
+        let err = mesh.propagate_graded(&[0.0, 0.0, f32::MAX]).unwrap_err();
+        assert!(
+            err.to_string().contains("must be finite"),
+            "unexpected error: {err}"
+        );
+        assert_eq!(mesh.tick(), 1, "tick must not advance on overflow rejection");
+
+        // A later overflowing product must not inject the earlier finite synapse.
+        assert!(mesh.propagate_graded(&[1.0, 0.0, f32::MAX]).is_err());
+        assert_eq!(mesh.tick(), 1);
+
+        assert_eq!(mesh.propagate(&[false, false, false]).unwrap()[1], 0.0);
+        let arrived = mesh.propagate(&[false, false, false]).unwrap();
+        assert!(
+            (arrived[1] - 1.0).abs() < 1e-6,
+            "in-flight current must be unchanged, got {}",
+            arrived[1]
+        );
     }
 
     #[test]

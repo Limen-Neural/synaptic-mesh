@@ -69,10 +69,15 @@ impl SynapseDescriptor {
     /// `weight` is a non-negative magnitude. Invalid magnitudes are rejected
     /// by [`crate::topology::SynapticGraph::from_descriptors`] and by
     /// descriptor deserialization rather than being silently `abs()`-normalized
-    /// here. Ordinary Rust struct literals can still construct a negative
-    /// `weight`; those values must fail at the next validated input path.
+    /// here.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `weight` is negative, NaN, or infinite. Ordinary Rust struct
+    /// literals can still construct those values; this check runs in release
+    /// builds so a negative inhibitory magnitude cannot flip sign.
     pub fn effective_weight(&self) -> f32 {
-        debug_assert!(
+        assert!(
             weight_magnitude_is_valid(self.weight),
             "synapse weight must be finite and non-negative, got {}",
             self.weight
@@ -249,6 +254,20 @@ mod tests {
         let desc: SynapseDescriptor = serde_json::from_str(json).unwrap();
         assert_eq!(desc.weight, 0.0);
         assert_eq!(desc.effective_weight(), 0.0);
+    }
+
+    #[test]
+    #[test]
+    #[should_panic(expected = "synapse weight must be finite and non-negative")]
+    fn effective_weight_panics_on_negative_inhibitory_magnitude() {
+        let desc = SynapseDescriptor {
+            source: 0,
+            target: 1,
+            weight: -0.5,
+            delay: 1,
+            polarity: Polarity::Inhibitory,
+        };
+        let _ = desc.effective_weight();
     }
 
     #[test]
