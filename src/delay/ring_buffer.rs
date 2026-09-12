@@ -35,9 +35,11 @@ use crate::error::{MeshError, Result};
 /// delay layer — it still allocates that one slot, one `f32` per neuron.
 ///
 /// Deserialization re-validates the ring invariants: depth is
-/// `max_delay + 1` (checked, nonzero), and every slot width equals
-/// `neuron_count`. Empty-neuron buffers (`neuron_count == 0`) remain
-/// legal when each slot is an empty vector.
+/// `max_delay + 1` (checked, nonzero), every slot width equals
+/// `neuron_count`, every stored current is finite, and `current_tick`
+/// can be advanced and used as a ring index without wrapping. Empty-neuron
+/// buffers (`neuron_count == 0`) remain legal when each slot is an empty
+/// vector.
 #[derive(Clone, Debug, Serialize)]
 pub struct SpikeDelayBuffer {
     /// Ring buffer: `slots[slot_index][neuron_id]` → accumulated current.
@@ -61,6 +63,7 @@ struct RawSpikeDelayBuffer {
 impl RawSpikeDelayBuffer {
     fn into_buffer(self) -> std::result::Result<SpikeDelayBuffer, String> {
         validate_delay_buffer_shape(&self.slots, self.neuron_count, self.max_delay)?;
+        validate_current_tick(self.current_tick)?;
         Ok(SpikeDelayBuffer {
             slots: self.slots,
             neuron_count: self.neuron_count,
@@ -71,7 +74,7 @@ impl RawSpikeDelayBuffer {
 }
 
 /// Ring depth must be `max_delay + 1` (nonzero, no overflow) and every
-/// slot must have width `neuron_count`.
+/// slot must have width `neuron_count` with only finite currents.
 fn validate_delay_buffer_shape(
     slots: &[Vec<f32>],
     neuron_count: usize,
@@ -96,6 +99,22 @@ fn validate_delay_buffer_shape(
                 slot.len()
             ));
         }
+        if slot.iter().any(|v| !v.is_finite()) {
+            return Err(format!(
+                "delay buffer slot {i} contains a non-finite current; refusing to poison later drain_current_tick sums"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// `advance` must not overflow `u64`, and `current_tick as usize` must not
+/// wrap on 32-bit targets when used as a ring index.
+fn validate_current_tick(current_tick: u64) -> std::result::Result<(), String> {
+    if current_tick >= usize::MAX as u64 {
+        return Err(
+            "current_tick is too large for safe advancement and indexing".into(),
+        );
     }
     Ok(())
 }
@@ -436,6 +455,33 @@ mod tests {
             r#"{"slots":[],"neuron_count":1,"max_delay":18446744073709551615,"current_tick":0}"#;
         assert!(serde_json::from_str::<SpikeDelayBuffer>(json).is_err());
         assert!(validate_delay_buffer_shape(&[], 1, usize::MAX).is_err());
+    }
+
+    #[test]
+    fn deserialize_rejects_current_tick_at_u64_max() {
+        let json = r#"{"slots":[[0.0],[0.0]],"neuron_count":1,"max_delay":1,"current_tick":18446744073709551615}"#;
+        assert!(serde_json::from_str::<SpikeDelayBuffer>(json).is_err());
+        assert!(validate_current_tick(u64::MAX).is_err());
+        assert!(validate_current_tick(usize::MAX as u64).is_err());
+        assert!(validate_current_tick(0).is_ok());
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    #[test]
+    fn deserialize_rejects_current_tick_that_wraps_usize() {
+        let json = r#"{"slots":[[0.0],[0.0]],"neuron_count":1,"max_delay":1,"current_tick":4294967296}"#;
+        assert!(serde_json::from_str::<SpikeDelayBuffer>(json).is_err());
+        assert!(validate_current_tick((usize::MAX as u64) + 1).is_err());
+    }
+
+    #[test]
+    fn validate_delay_buffer_shape_rejects_non_finite_currents() {
+        // JSON has no NaN/Infinity literal; a non-JSON serde format could
+        // otherwise smuggle these values into drain_current_tick sums.
+        assert!(validate_delay_buffer_shape(&[vec![0.1], vec![f32::NAN]], 1, 1).is_err());
+        assert!(validate_delay_buffer_shape(&[vec![f32::INFINITY], vec![0.0]], 1, 1).is_err());
+        assert!(validate_delay_buffer_shape(&[vec![0.0], vec![f32::NEG_INFINITY]], 1, 1).is_err());
+        assert!(validate_delay_buffer_shape(&[vec![0.1, -0.0], vec![2.0, 0.0]], 2, 1).is_ok());
     }
 
     #[test]
