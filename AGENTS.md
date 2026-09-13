@@ -38,6 +38,11 @@ This file contains workflow and orientation notes for AI agents working on this 
 - All `synaptic-mesh` work stays in `/home/raulmc/synaptic-mesh`.
 - Sister crate: `corinth-canal` at `/home/raulmc/corinth-canal` (inspiration for architecture patterns).
 - Run `cargo check`, `cargo test` before closing substantial Rust changes.
+- Commits and PR titles should keep carrying Linear identifiers (`LIM-xxxx`) so Linear Release scanning can attach issues. GitHub is source of truth for issue state.
+
+## GitHub Actions secrets
+
+- **`LINEAR_ACCESS_KEY`**: Linear pipeline access key for this repo's Linear Releases pipeline ([synaptic-mesh Releases](https://linear.app/rpd-34/pipeline/synaptic-mesh/releases)). Used by `.github/workflows/linear-release.yml` (`linear/linear-release-action@v0`). Create the key on that pipeline's settings page in Linear and store it as a GitHub Actions repository secret (`Settings → Secrets and variables → Actions`). Do not commit the key. **Not currently set** — this repo's Actions secrets still only have leftover Qodana tokens; add `LINEAR_ACCESS_KEY` before the workflow can talk to Linear. After it is set, dry-run once via Actions → Linear Release → Run workflow (`dry_run` defaults to true).
 
 ## Repository Context
 

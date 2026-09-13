@@ -1,0 +1,83 @@
+# Linear Release — scheduled pipeline (named versions already exist in Linear).
+#
+# Kept out of ci.yml: that workflow is the Rust MSRV / build / test / package
+# / cargo-deny gate. This job only talks to Linear Releases and must fetch full
+# git history (`fetch-depth: 0`).
+#
+# Pipeline: https://linear.app/rpd-34/pipeline/synaptic-mesh/releases
+# Action:   linear/linear-release-action@v0  (issue #72 / LIM-1150)
+#
+# GitHub remains source of truth for issue state. Commits and PR titles
+# should keep carrying Linear identifiers (LIM-xxxx) so scanning can attach
+# issues; no extra `issue_pattern` is configured.
+
+name: Linear Release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Scan commits without mutating Linear releases
+        type: boolean
+        default: true
+      version:
+        description: Optional Linear release version (omit to target current started/planned)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  linear-release:
+    name: Sync Linear release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      # Push to main: no version → current started/planned release.
+      # Tag v*: strip leading v (v0.3.0 → 0.3.0).
+      # workflow_dispatch: optional version input.
+      - name: Resolve Linear release version
+        id: version
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          DISPATCH_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
+        run: |
+          set -euo pipefail
+          version=""
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            version="${DISPATCH_VERSION}"
+          elif [ "$REF_TYPE" = "tag" ]; then
+            version="${REF_NAME#v}"
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      # dry_run only on workflow_dispatch when requested (default true there).
+      # Main pushes and tag pushes always mutate.
+      - name: Sync issues into Linear release
+        uses: linear/linear-release-action@v0
+        with:
+          access_key: ${{ secrets.LINEAR_ACCESS_KEY }}
+          command: sync
+          version: ${{ steps.version.outputs.version }}
+          dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+
+      - name: Complete Linear release for tagged version
+        if: github.ref_type == 'tag' && steps.version.outputs.version != ''
+        uses: linear/linear-release-action@v0
+        with:
+          access_key: ${{ secrets.LINEAR_ACCESS_KEY }}
+          command: complete
+          version: ${{ steps.version.outputs.version }}

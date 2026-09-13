@@ -36,6 +36,11 @@ crate without any Limen context. Issue #37 promotes this section to
   building the unpacked `.crate` outside the repository so an over-eager
   `exclude` or a repo-only build dependency fails CI instead of crates.io
   (issue #36).
+- **CI**: Linear Release workflow (`.github/workflows/linear-release.yml`)
+  syncs GitHub commits/PRs into the Linear synaptic-mesh Releases pipeline
+  (`command: sync` on `main`; tag `v*` syncs then `complete`s that version).
+  GitHub remains source of truth for issue state (issue #72 / LIM-1150).
+
 
 ### Fixed
 
