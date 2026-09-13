@@ -9,12 +9,15 @@ Run them before claiming a PR is ready when the change touches `src/`,
 `Cargo.toml` `rust-version`, `rust-toolchain.toml` `channel`, the README's
 **MSRV** line, and every `toolchain:` / `rust-version:` pin in
 `.github/workflows/ci.yml` (the toolchain install, the packaging job, and
-the `cargo-deny` action) must stay **identical** (currently **1.98.1**).
-CI fails if they drift (issue #35 / LIM-1042).
+the `cargo-deny` action) and `.github/workflows/coverage.yml` must stay
+**identical** (currently **1.98.1**). The `validate` job in `ci.yml`
+checks `ci.yml` pins; keep `coverage.yml` on the same version by hand
+(issue #35 / LIM-1042).
 
 To bump MSRV:
 
-1. Set the new version in Cargo.toml, rust-toolchain.toml, README.md, and ci.yml.
+1. Set the new version in Cargo.toml, rust-toolchain.toml, README.md,
+   ci.yml, and coverage.yml.
 2. Run the mandatory commands below on that toolchain
    (`rustup run <ver> cargo test --locked`, etc.).
 3. Confirm GitHub Actions is green.

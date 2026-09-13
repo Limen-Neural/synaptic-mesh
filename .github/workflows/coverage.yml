@@ -1,0 +1,66 @@
+# Codecov coverage workflow (separate from main CI per observability split).
+# Third-party Actions are pinned to immutable commit SHAs (Aikido supply-chain policy).
+name: Codecov
+
+on:
+  push:
+    branches: [main]
+  # Every PR (not only those targeting main) so stacked branches still upload.
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  codecov:
+    name: Codecov
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      # Keep in lockstep with rust-toolchain.toml / Cargo.toml rust-version / ci.yml
+      # (MSRV pin rule / #35). Do not invent a second toolchain here.
+      - name: Install Rust 1.98.1
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8
+        with:
+          toolchain: "1.98.1"
+          components: llvm-tools-preview
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # pinned (taiki-e/install-action v2)
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Install nextest
+        uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # pinned (taiki-e/install-action v2)
+        with:
+          tool: nextest
+          version: '0.9.70'
+
+      - name: Generate coverage (lcov) + JUnit (single nextest pass via llvm-cov integration)
+        run: cargo llvm-cov nextest --all-features --profile ci --lcov --output-path lcov.info
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@0fa95f0e1eeaafde2c782583b36b28ad0d8c77d3 # v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: junit.xml
+          fail_ci_if_error: false
+
+      - name: Codecov
+        uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        with:
+          files: lcov.info
+          slug: Limen-Neural/synaptic-mesh
+          fail_ci_if_error: false
+          verbose: true
