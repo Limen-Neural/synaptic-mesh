@@ -1,2 +1,3 @@
+# Path is relative to store.dir/<profile> (target/nextest/ci/junit.xml).
 [profile.ci.junit]
 path = "junit.xml"

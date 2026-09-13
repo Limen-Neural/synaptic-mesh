@@ -41,8 +41,8 @@ jobs:
       - name: Install nextest
         uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # pinned (taiki-e/install-action v2)
         with:
-          tool: nextest
-          version: '0.9.70'
+          # install-action takes `tool@version`, not a separate `version:` input.
+          tool: nextest@0.9.70
 
       - name: Generate coverage (lcov) + JUnit (single nextest pass via llvm-cov integration)
         run: cargo llvm-cov nextest --all-features --profile ci --lcov --output-path lcov.info
@@ -52,7 +52,8 @@ jobs:
         uses: codecov/test-results-action@0fa95f0e1eeaafde2c782583b36b28ad0d8c77d3 # v1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: junit.xml
+          # nextest writes `junit.path` relative to store.dir/<profile>.
+          files: target/nextest/ci/junit.xml
           fail_ci_if_error: false
 
       - name: Codecov

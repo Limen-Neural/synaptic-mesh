@@ -12,7 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CI**: Codecov coverage workflow (`.github/workflows/coverage.yml`)
   uploads LCOV from `cargo llvm-cov nextest` on PRs and `main`.
   The MSRV pin-agreement check now also requires `coverage.yml`
-  to stay on the same Rust version as `ci.yml` (issue #77 / LIM-1180).
+  to stay on the same Rust version as `ci.yml`. JUnit results are
+  uploaded from `target/nextest/ci/junit.xml` (issue #77 / LIM-1180).
 
 ## [0.3.0] - 2026-09-13
 
