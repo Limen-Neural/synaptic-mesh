@@ -24,9 +24,10 @@ on:
         type: boolean
         default: true
       version:
-        description: Optional Linear release version (omit to target current started/planned)
+        description: Linear release version (defaults to 0.3.0)
         required: false
         type: string
+        default: "0.3.0"
 
 permissions:
   contents: read
@@ -43,9 +44,9 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      # Push to main: no version → current started/planned release.
-      # Tag: only vMAJOR.MINOR.PATCH (v0.3.0 → 0.3.0); anything else is empty.
-      # workflow_dispatch: optional version input.
+      # Push to main: 0.3.0 (Linear In Progress). Tag: vMAJOR.MINOR.PATCH only
+      # (v0.3.0 → 0.3.0); anything else is empty and skips complete.
+      # workflow_dispatch: version input, default 0.3.0.
       - name: Resolve Linear release version
         id: version
         shell: bash
@@ -65,6 +66,8 @@ jobs:
             else
               echo "Ignoring tag ${REF_NAME}: Linear release tags must be vMAJOR.MINOR.PATCH"
             fi
+          else
+            version="0.3.0"
           fi
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
