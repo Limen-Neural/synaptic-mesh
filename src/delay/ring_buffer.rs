@@ -37,7 +37,8 @@ use crate::error::{MeshError, Result};
 /// Deserialization re-validates the ring invariants: depth is
 /// `max_delay + 1` (checked, nonzero), every slot width equals
 /// `neuron_count`, every stored current is finite, and `current_tick`
-/// can be advanced and used as a ring index without wrapping. Empty-neuron
+/// can be advanced with `current_tick + max_delay` fitting in `usize`
+/// so inject/drain slot arithmetic cannot overflow. Empty-neuron
 /// buffers (`neuron_count == 0`) remain legal when each slot is an empty
 /// vector.
 #[derive(Clone, Debug, Serialize)]
@@ -63,7 +64,7 @@ struct RawSpikeDelayBuffer {
 impl RawSpikeDelayBuffer {
     fn into_buffer(self) -> std::result::Result<SpikeDelayBuffer, String> {
         validate_delay_buffer_shape(&self.slots, self.neuron_count, self.max_delay)?;
-        validate_current_tick(self.current_tick)?;
+        validate_current_tick(self.current_tick, self.max_delay)?;
         Ok(SpikeDelayBuffer {
             slots: self.slots,
             neuron_count: self.neuron_count,
@@ -108,11 +109,17 @@ fn validate_delay_buffer_shape(
     Ok(())
 }
 
-/// `advance` must not overflow `u64`, and `current_tick as usize` must not
-/// wrap on 32-bit targets when used as a ring index.
-fn validate_current_tick(current_tick: u64) -> std::result::Result<(), String> {
+/// `advance` must not overflow `u64`, and `current_tick + max_delay` must
+/// fit in `usize` so inject slot arithmetic cannot wrap.
+fn validate_current_tick(current_tick: u64, max_delay: usize) -> std::result::Result<(), String> {
     if current_tick >= usize::MAX as u64 {
         return Err("current_tick is too large for safe advancement and indexing".into());
+    }
+    let max_safe_tick = (usize::MAX as u64).saturating_sub(max_delay as u64);
+    if current_tick > max_safe_tick {
+        return Err(format!(
+            "current_tick {current_tick} is too large to add max_delay {max_delay} without overflowing usize indexing"
+        ));
     }
     Ok(())
 }
@@ -232,9 +239,14 @@ impl SpikeDelayBuffer {
         self.slots[self.slot_index(delay)][target]
     }
 
+    /// Reduce `current_tick` modulo ring depth before adding `delay` so
+    /// `current_tick + delay` cannot overflow `usize`.
     #[inline]
     fn slot_index(&self, delay: usize) -> usize {
-        (self.current_tick as usize + delay) % self.slots.len()
+        let depth = self.slots.len();
+        debug_assert!(depth > 0);
+        let tick_mod = (self.current_tick % depth as u64) as usize;
+        tick_mod.wrapping_add(delay) % depth
     }
 
     /// Drain the current tick's accumulated synaptic currents.
@@ -459,9 +471,36 @@ mod tests {
     fn deserialize_rejects_current_tick_at_u64_max() {
         let json = r#"{"slots":[[0.0],[0.0]],"neuron_count":1,"max_delay":1,"current_tick":18446744073709551615}"#;
         assert!(serde_json::from_str::<SpikeDelayBuffer>(json).is_err());
-        assert!(validate_current_tick(u64::MAX).is_err());
-        assert!(validate_current_tick(usize::MAX as u64).is_err());
-        assert!(validate_current_tick(0).is_ok());
+        assert!(validate_current_tick(u64::MAX, 1).is_err());
+        assert!(validate_current_tick(usize::MAX as u64, 1).is_err());
+        assert!(validate_current_tick(0, 1).is_ok());
+    }
+
+    #[test]
+    fn deserialize_rejects_current_tick_that_overflows_inject_arithmetic() {
+        let tick = usize::MAX as u64 - 1;
+        let json = format!(
+            r#"{{"slots":[[0.0],[0.0],[0.0]],"neuron_count":1,"max_delay":2,"current_tick":{tick}}}"#
+        );
+        let err = serde_json::from_str::<SpikeDelayBuffer>(&json).unwrap_err();
+        assert!(
+            err.to_string().contains("overflowing usize indexing"),
+            "unexpected error: {err}"
+        );
+        assert!(validate_current_tick(tick, 2).is_err());
+        // Boundary: current_tick + max_delay == usize::MAX is still safe.
+        assert!(validate_current_tick(usize::MAX as u64 - 2, 2).is_ok());
+    }
+
+    #[test]
+    fn deserialize_accepts_current_tick_at_inject_arithmetic_limit() {
+        let tick = usize::MAX as u64 - 2;
+        let json = format!(
+            r#"{{"slots":[[0.0],[0.0],[0.0]],"neuron_count":1,"max_delay":2,"current_tick":{tick}}}"#
+        );
+        let mut buf: SpikeDelayBuffer = serde_json::from_str(&json).unwrap();
+        buf.inject(0, 1.0, 2);
+        assert_eq!(buf.current_tick(), tick);
     }
 
     #[cfg(target_pointer_width = "32")]
@@ -470,7 +509,7 @@ mod tests {
         let json =
             r#"{"slots":[[0.0],[0.0]],"neuron_count":1,"max_delay":1,"current_tick":4294967296}"#;
         assert!(serde_json::from_str::<SpikeDelayBuffer>(json).is_err());
-        assert!(validate_current_tick((usize::MAX as u64) + 1).is_err());
+        assert!(validate_current_tick((usize::MAX as u64) + 1, 1).is_err());
     }
 
     #[test]

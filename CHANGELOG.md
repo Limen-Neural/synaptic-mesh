@@ -76,9 +76,10 @@ crate without any Limen context. Issue #37 promotes this section to
   structurally inconsistent payloads at deserialize time (empty/wrong-depth
   rings, ragged slot widths, `max_delay + 1` overflow, graph/buffer count
   mismatch, inadequate delay capacity, tick mismatch, `current_tick` values
-  that cannot safely advance or index, and non-finite slot currents)
-  instead of panicking or delivering currents on the wrong tick later
-  (issue #64). Valid existing checkpoint JSON is unchanged.
+  that cannot safely advance or add `max_delay` without overflowing `usize`
+  indexing, and non-finite slot currents) instead of panicking or delivering
+  currents on the wrong tick later (issue #64). Valid existing checkpoint
+  JSON is unchanged.
 
 ### Removed
 
