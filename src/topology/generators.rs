@@ -105,9 +105,21 @@ pub fn generate_random(
 
 /// Watts–Strogatz small-world graph.
 ///
-/// Start with a ring lattice where each neuron is connected to its `k` nearest
-/// neighbours (k/2 on each side). Then each edge is rewired with probability
-/// `beta` to a uniformly random target.
+/// Start with a **directed** ring lattice: each neuron has `k` outgoing
+/// synapses to its nearest neighbours — `k/2` clockwise and `k/2`
+/// counterclockwise, with no self-loop. `k` must be even and in `[2, n-1]`.
+/// Odd `k` is rejected rather than silently truncated by integer division.
+///
+/// Then each outgoing synapse is rewired independently with probability
+/// `beta` to a different non-self target when one is available. Rewiring
+/// never introduces a self-loop or a duplicate outgoing target, so a valid
+/// graph always has exactly `n * k` directed synapses (including `beta = 1`
+/// and a dense ring `k = n - 1` when that value is even; a dense ring has
+/// no unused target, so the original synapse is kept).
+///
+/// **Changed graphs:** the previous implementation only stored the
+/// clockwise half of the lattice, so identical `(n, k, beta, …)` inputs
+/// now produce a different (still deterministic) topology.
 ///
 /// # References
 ///
@@ -125,9 +137,9 @@ pub fn generate_small_world(
             "small-world requires n ≥ 3".into(),
         ));
     }
-    if k == 0 || k >= n {
+    if k < 2 || k >= n || !k.is_multiple_of(2) {
         return Err(MeshError::InvalidConfig(format!(
-            "k={k} must be in [1, n-1)"
+            "k={k} must be even and in [2, n-1]"
         )));
     }
     if !(0.0..=1.0).contains(&beta) {
@@ -152,42 +164,76 @@ pub fn generate_small_world(
             Polarity::Excitatory
         };
 
+        let mut targets = Vec::with_capacity(k);
         for offset in 1..=half_k {
-            let mut tgt = (src + offset) % n;
+            targets.push((src + offset) % n);
+            targets.push((src + n - offset) % n);
+        }
 
-            // Rewire with probability beta
-            if hash_pair(src * 131 + offset, tgt * 79) < beta {
-                // Pick a deterministic "random" target
-                let new_tgt =
-                    (hash_pair(src * 173 + offset * 41, n * 29) * (n - 1) as f32) as usize;
-                let new_tgt = if new_tgt >= src {
-                    (new_tgt + 1) % n
-                } else {
-                    new_tgt
-                };
-                tgt = new_tgt;
+        for i in 0..targets.len() {
+            let salt = i + 1;
+            if hash_pair(src * 131 + salt, targets[i] * 79) < beta {
+                targets[i] = rewire_small_world_target(src, &targets, targets[i], n, salt);
             }
+        }
 
-            if tgt != src {
-                descriptors.push(SynapseDescriptor {
-                    source: src as u32,
-                    target: tgt as u32,
-                    weight: hash_weight(src, tgt, 0.4, 0.5),
-                    delay: hash_delay(src, tgt, max_delay),
-                    polarity,
-                });
-            }
+        for tgt in targets {
+            debug_assert_ne!(tgt, src, "small-world must not create a self-loop");
+            descriptors.push(SynapseDescriptor {
+                source: src as u32,
+                target: tgt as u32,
+                weight: hash_weight(src, tgt, 0.4, 0.5),
+                delay: hash_delay(src, tgt, max_delay),
+                polarity,
+            });
         }
     }
 
     SynapticGraph::from_descriptors(n, &descriptors)
 }
 
+/// Replace `replacing` with a deterministic unused target, or keep it when
+/// the ring is already a complete directed graph (`k = n - 1`).
+fn rewire_small_world_target(
+    src: usize,
+    current_targets: &[usize],
+    replacing: usize,
+    n: usize,
+    salt: usize,
+) -> usize {
+    let mut occupied = vec![false; n];
+    occupied[src] = true;
+    occupied[replacing] = true;
+    for &tgt in current_targets {
+        if tgt != replacing {
+            occupied[tgt] = true;
+        }
+    }
+    let candidates: Vec<usize> = (0..n).filter(|&idx| !occupied[idx]).collect();
+    if candidates.is_empty() {
+        return replacing;
+    }
+    let h = hash_pair(src * 173 + salt * 41, n * 29);
+    let idx = ((h * candidates.len() as f32) as usize).min(candidates.len() - 1);
+    candidates[idx]
+}
+
 /// Barabási–Albert scale-free graph.
 ///
-/// Start with `m0` fully connected neurons. Each new neuron attaches to `m`
-/// existing neurons with probability proportional to their current degree
-/// (preferential attachment).
+/// Start with `m0` fully connected neurons (`m0 * (m0 - 1)` directed
+/// synapses). Each new neuron attaches to **exactly** `m` distinct older
+/// neurons, chosen with a bounded weighted sample proportional to current
+/// degree (preferential attachment). Each attachment is stored as a
+/// reciprocal directed pair, so the final directed synapse count is
+/// `m0 * (m0 - 1) + 2 * m * (n - m0)`.
+///
+/// Later nodes may attach to an earlier node, so a node's **final**
+/// out-degree is not `m`. The contract is: every new node `v >= m0` has
+/// exactly `m` outgoing synapses whose targets are `< v`.
+///
+/// **Changed graphs:** the previous scan could stop with fewer than `m`
+/// attachments; identical `(n, m0, m, …)` inputs now produce a different
+/// (still deterministic) topology.
 ///
 /// # References
 ///
@@ -249,49 +295,55 @@ pub fn generate_scale_free(
             Polarity::Excitatory
         };
 
-        let total_degree: usize = degree[..new_node].iter().sum();
-        let mut attached = 0;
-        let mut target_cursor = 0;
-
-        // Deterministic preferential attachment
-        while attached < m && target_cursor < new_node {
-            let prob = if total_degree > 0 {
-                degree[target_cursor] as f32 / total_degree as f32
+        let older_targets = select_preferential_targets(new_node, m, &degree);
+        for target_cursor in older_targets {
+            descriptors.push(SynapseDescriptor {
+                source: new_node as u32,
+                target: target_cursor as u32,
+                weight: hash_weight(new_node, target_cursor, 0.3, 0.6),
+                delay: hash_delay(new_node, target_cursor, max_delay),
+                polarity,
+            });
+            // Bidirectional attachment; polarity follows the source neuron.
+            let reverse_polarity = if target_cursor < inhibitory_cutoff {
+                Polarity::Inhibitory
             } else {
-                1.0 / new_node as f32
+                Polarity::Excitatory
             };
-
-            let roll = hash_pair(new_node * 113 + attached * 59, target_cursor * 83);
-            if roll < prob * (m as f32) {
-                descriptors.push(SynapseDescriptor {
-                    source: new_node as u32,
-                    target: target_cursor as u32,
-                    weight: hash_weight(new_node, target_cursor, 0.3, 0.6),
-                    delay: hash_delay(new_node, target_cursor, max_delay),
-                    polarity,
-                });
-                // Bidirectional attachment
-                let reverse_polarity = if target_cursor < inhibitory_cutoff {
-                    Polarity::Inhibitory
-                } else {
-                    Polarity::Excitatory
-                };
-                descriptors.push(SynapseDescriptor {
-                    source: target_cursor as u32,
-                    target: new_node as u32,
-                    weight: hash_weight(target_cursor, new_node, 0.3, 0.6),
-                    delay: hash_delay(target_cursor, new_node, max_delay),
-                    polarity: reverse_polarity,
-                });
-                degree[new_node] += 1;
-                degree[target_cursor] += 1;
-                attached += 1;
-            }
-            target_cursor += 1;
+            descriptors.push(SynapseDescriptor {
+                source: target_cursor as u32,
+                target: new_node as u32,
+                weight: hash_weight(target_cursor, new_node, 0.3, 0.6),
+                delay: hash_delay(target_cursor, new_node, max_delay),
+                polarity: reverse_polarity,
+            });
+            degree[new_node] += 1;
+            degree[target_cursor] += 1;
         }
     }
 
     SynapticGraph::from_descriptors(n, &descriptors)
+}
+
+/// Bounded weighted sample of `m` distinct older nodes (`0..new_node`).
+///
+/// Uses Efraimidis–Spirakis keys `u^(1/w)` so high-degree nodes are
+/// preferred without an unbounded retry loop. Ties break on neuron id.
+fn select_preferential_targets(new_node: usize, m: usize, degree: &[usize]) -> Vec<usize> {
+    debug_assert!(new_node >= m);
+    let mut scored: Vec<(f32, usize)> = (0..new_node)
+        .map(|j| {
+            let weight = degree[j].max(1) as f32;
+            let u = hash_pair(new_node * 113 + 59, j * 83).clamp(1e-9, 1.0 - 1e-9);
+            (u.powf(1.0 / weight), j)
+        })
+        .collect();
+    scored.sort_by(|a, b| {
+        b.0.partial_cmp(&a.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.1.cmp(&b.1))
+    });
+    scored.into_iter().take(m).map(|(_, j)| j).collect()
 }
 
 /// Feed-forward layered network.
@@ -395,7 +447,104 @@ mod tests {
     fn small_world_deterministic() {
         let g1 = generate_small_world(32, 4, 0.3, 5, 0.2).unwrap();
         let g2 = generate_small_world(32, 4, 0.3, 5, 0.2).unwrap();
-        assert_eq!(g1.synapse_count(), g2.synapse_count());
+        assert_eq!(g1, g2);
+    }
+
+    #[test]
+    fn small_world_ring_has_k_outgoing_neighbors() {
+        let graph = generate_small_world(8, 4, 0.0, 1, 0.0).unwrap();
+        assert_eq!(graph.synapse_count(), 32);
+        for source in 0..8 {
+            assert_eq!(graph.out_degree(source), 4);
+            let mut targets: Vec<usize> = graph
+                .outgoing(source)
+                .map(|(t, _, _, _)| t as usize)
+                .collect();
+            targets.sort_unstable();
+            let unique = targets.clone();
+            targets.dedup();
+            assert_eq!(targets, unique, "source {source} has duplicate targets");
+            assert!(!targets.contains(&source), "self-loop at {source}");
+            let expected = {
+                let mut e = vec![
+                    (source + 1) % 8,
+                    (source + 2) % 8,
+                    (source + 8 - 1) % 8,
+                    (source + 8 - 2) % 8,
+                ];
+                e.sort_unstable();
+                e
+            };
+            assert_eq!(targets, expected);
+        }
+    }
+
+    #[test]
+    fn small_world_rejects_odd_k() {
+        let err = generate_small_world(8, 3, 0.0, 1, 0.0).unwrap_err();
+        assert!(err.to_string().contains("even"), "{err}");
+        assert!(generate_small_world(8, 1, 0.0, 1, 0.0).is_err());
+    }
+
+    #[test]
+    fn small_world_min_valid_size() {
+        let g = generate_small_world(3, 2, 0.0, 1, 0.0).unwrap();
+        assert_eq!(g.synapse_count(), 6);
+        for src in 0..3 {
+            assert_eq!(g.out_degree(src), 2);
+        }
+    }
+
+    #[test]
+    fn small_world_rewiring_preserves_edge_count_and_no_loops() {
+        for beta in [0.0, 0.5, 1.0] {
+            let g = generate_small_world(8, 4, beta, 1, 0.0).unwrap();
+            assert_eq!(g.synapse_count(), 32, "beta={beta}");
+            for src in 0..8 {
+                let mut targets: Vec<usize> =
+                    g.outgoing(src).map(|(t, _, _, _)| t as usize).collect();
+                assert_eq!(targets.len(), 4, "beta={beta} src={src}");
+                assert!(!targets.contains(&src));
+                targets.sort_unstable();
+                let before = targets.len();
+                targets.dedup();
+                assert_eq!(targets.len(), before, "duplicate at beta={beta} src={src}");
+            }
+        }
+    }
+
+    #[test]
+    fn small_world_dense_ring() {
+        let g = generate_small_world(5, 4, 1.0, 1, 0.0).unwrap();
+        assert_eq!(g.synapse_count(), 20);
+        for src in 0..5 {
+            assert_eq!(g.out_degree(src), 4);
+        }
+    }
+
+    #[test]
+    fn small_world_beta_1_rewires_every_non_dense_ring_slot() {
+        let n = 8;
+        let k = 4;
+        let half_k = k / 2;
+        let g = generate_small_world(n, k, 1.0, 1, 0.0).unwrap();
+        assert_eq!(g.synapse_count(), n * k);
+        for src in 0..n {
+            let mut original = Vec::with_capacity(k);
+            for offset in 1..=half_k {
+                original.push((src + offset) % n);
+                original.push((src + n - offset) % n);
+            }
+            let final_targets: Vec<usize> =
+                g.outgoing(src).map(|(t, _, _, _)| t as usize).collect();
+            assert_eq!(final_targets.len(), k, "src={src}");
+            for (slot, &tgt) in final_targets.iter().enumerate() {
+                assert_ne!(
+                    tgt, original[slot],
+                    "src={src} slot={slot} kept original ring target {tgt}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -410,6 +559,58 @@ mod tests {
             seed_degree >= late_degree,
             "seed degree {seed_degree} should be ≥ late degree {late_degree}"
         );
+    }
+
+    fn assert_scale_free_contract(n: usize, m0: usize, m: usize) {
+        let g = generate_scale_free(n, m0, m, 5, 0.2).unwrap();
+        assert_eq!(
+            g.synapse_count(),
+            m0 * (m0 - 1) + 2 * m * (n - m0),
+            "directed edge count"
+        );
+        for v in m0..n {
+            let mut older: Vec<usize> = g
+                .outgoing(v)
+                .map(|(t, _, _, _)| t as usize)
+                .filter(|&t| t < v)
+                .collect();
+            older.sort_unstable();
+            let before = older.len();
+            older.dedup();
+            assert_eq!(older.len(), before, "duplicate older targets at {v}");
+            assert_eq!(older.len(), m, "older attachments at {v}");
+            assert!(!older.contains(&v));
+        }
+        let g2 = generate_scale_free(n, m0, m, 5, 0.2).unwrap();
+        assert_eq!(g, g2);
+    }
+
+    #[test]
+    fn scale_free_exact_older_attachments() {
+        assert_scale_free_contract(50, 5, 3);
+    }
+
+    #[test]
+    fn scale_free_m_equals_one() {
+        assert_scale_free_contract(10, 3, 1);
+    }
+
+    #[test]
+    fn scale_free_m_equals_m0() {
+        assert_scale_free_contract(12, 4, 4);
+    }
+
+    #[test]
+    fn scale_free_min_valid_size() {
+        assert_scale_free_contract(2, 2, 1);
+    }
+
+    #[test]
+    fn scale_free_rejects_endpoint_bounds() {
+        assert!(generate_scale_free(5, 1, 1, 1, 0.0).is_err());
+        assert!(generate_scale_free(5, 6, 2, 1, 0.0).is_err());
+        assert!(generate_scale_free(5, 3, 0, 1, 0.0).is_err());
+        assert!(generate_scale_free(5, 3, 4, 1, 0.0).is_err());
     }
 
     #[test]
