@@ -36,11 +36,11 @@ use crate::error::{MeshError, Result};
 ///
 /// Deserialization re-validates the ring invariants: depth is
 /// `max_delay + 1` (checked, nonzero), every slot width equals
-/// `neuron_count`, every stored current is finite, and `current_tick`
-/// can be advanced with `current_tick + max_delay` fitting in `usize`
-/// so inject/drain slot arithmetic cannot overflow. Empty-neuron
-/// buffers (`neuron_count == 0`) remain legal when each slot is an empty
-/// vector.
+/// `neuron_count`, every stored current is finite, `current_tick + max_delay`
+/// fits in `usize` so inject/drain slot arithmetic cannot overflow, and
+/// `current_tick` leaves one-tick headroom so `advance` cannot land on
+/// `usize::MAX`. Empty-neuron buffers (`neuron_count == 0`) remain legal
+/// when each slot is an empty vector.
 #[derive(Clone, Debug, Serialize)]
 pub struct SpikeDelayBuffer {
     /// Ring buffer: `slots[slot_index][neuron_id]` → accumulated current.
@@ -109,9 +109,13 @@ fn validate_delay_buffer_shape(
     Ok(())
 }
 
-/// `advance` must not overflow `u64`, and `current_tick + max_delay` must
-/// fit in `usize` so inject slot arithmetic cannot wrap.
-fn validate_current_tick(current_tick: u64, max_delay: usize) -> std::result::Result<(), String> {
+/// `advance` (`+= 1`) must not land on `usize::MAX`, and
+/// `current_tick + max_delay` must fit in `usize` so inject slot arithmetic
+/// cannot wrap.
+pub(crate) fn validate_current_tick(
+    current_tick: u64,
+    max_delay: usize,
+) -> std::result::Result<(), String> {
     if current_tick >= usize::MAX as u64 {
         return Err("current_tick is too large for safe advancement and indexing".into());
     }
@@ -120,6 +124,12 @@ fn validate_current_tick(current_tick: u64, max_delay: usize) -> std::result::Re
         return Err(format!(
             "current_tick {current_tick} is too large to add max_delay {max_delay} without overflowing usize indexing"
         ));
+    }
+    // One subsequent `+= 1` must stay strictly below `usize::MAX`, even when
+    // `max_delay` is 0 or 1 and inject arithmetic would otherwise allow
+    // `current_tick == usize::MAX - 1`.
+    if current_tick >= (usize::MAX as u64).saturating_sub(1) {
+        return Err("current_tick is too large for safe advancement and indexing".into());
     }
     Ok(())
 }
@@ -474,6 +484,22 @@ mod tests {
         assert!(validate_current_tick(u64::MAX, 1).is_err());
         assert!(validate_current_tick(usize::MAX as u64, 1).is_err());
         assert!(validate_current_tick(0, 1).is_ok());
+    }
+
+    #[test]
+    fn deserialize_rejects_current_tick_that_advances_to_usize_max() {
+        let tick = usize::MAX as u64 - 1;
+        let json_delay0 =
+            format!(r#"{{"slots":[[0.0]],"neuron_count":1,"max_delay":0,"current_tick":{tick}}}"#);
+        let json_delay1 = format!(
+            r#"{{"slots":[[0.0],[0.0]],"neuron_count":1,"max_delay":1,"current_tick":{tick}}}"#
+        );
+        assert!(serde_json::from_str::<SpikeDelayBuffer>(&json_delay0).is_err());
+        assert!(serde_json::from_str::<SpikeDelayBuffer>(&json_delay1).is_err());
+        assert!(validate_current_tick(tick, 0).is_err());
+        assert!(validate_current_tick(tick, 1).is_err());
+        assert!(validate_current_tick(usize::MAX as u64 - 2, 0).is_ok());
+        assert!(validate_current_tick(usize::MAX as u64 - 2, 1).is_ok());
     }
 
     #[test]

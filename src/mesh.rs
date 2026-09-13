@@ -24,7 +24,7 @@
 use serde::de::{Deserializer, Error as DeError};
 use serde::{Deserialize, Serialize};
 
-use crate::delay::SpikeDelayBuffer;
+use crate::delay::{SpikeDelayBuffer, validate_current_tick};
 use crate::error::{MeshError, Result};
 use crate::topology::SynapticGraph;
 
@@ -36,8 +36,9 @@ use crate::topology::SynapticGraph;
 ///
 /// Deserialization requires the graph and buffer neuron counts to agree,
 /// the buffer capacity to be at least the graph's maximum delay, and
-/// `tick` to equal `delay_buffer.current_tick`. Inconsistent timestamps
-/// are rejected rather than repaired.
+/// `tick` to equal `delay_buffer.current_tick`. Both ticks must leave
+/// headroom so one `propagate` cannot land on `usize::MAX`. Inconsistent
+/// timestamps are rejected rather than repaired.
 #[derive(Clone, Debug, Serialize)]
 pub struct SynapticMesh {
     /// The wiring diagram.
@@ -71,6 +72,9 @@ impl RawSynapticMesh {
                 self.delay_buffer.max_delay()
             ));
         }
+        let max_delay = self.delay_buffer.max_delay();
+        validate_current_tick(self.tick, max_delay)?;
+        validate_current_tick(self.delay_buffer.current_tick(), max_delay)?;
         if self.tick != self.delay_buffer.current_tick() {
             return Err(format!(
                 "mesh tick {} does not match delay buffer current_tick {}",
@@ -428,6 +432,22 @@ mod tests {
             v["tick"] = serde_json::json!(3);
         });
         assert!(serde_json::from_str::<SynapticMesh>(&json).is_err());
+    }
+
+    #[test]
+    fn deserialize_rejects_tick_that_advances_to_usize_max() {
+        let tick = usize::MAX as u64 - 1;
+        for delay in [0_u16, 1] {
+            let mesh = SynapticMesh::new(two_neuron_delay_graph(delay));
+            let json = mesh_json_with_override(&mesh, |v| {
+                v["tick"] = serde_json::json!(tick);
+                v["delay_buffer"]["current_tick"] = serde_json::json!(tick);
+            });
+            assert!(
+                serde_json::from_str::<SynapticMesh>(&json).is_err(),
+                "synchronized tick usize::MAX - 1 with max_delay {delay} must be rejected"
+            );
+        }
     }
 
     #[test]

@@ -8,3 +8,4 @@
 mod ring_buffer;
 
 pub use ring_buffer::SpikeDelayBuffer;
+pub(crate) use ring_buffer::validate_current_tick;
