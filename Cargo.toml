@@ -23,6 +23,7 @@ exclude = [
     "/.github/",
     "/REVIEW.md",
     "/.codacy.yml",
+    "/.deepsource.toml",
     "/.devin/",
     "/.gitignore",
     "/AGENTS.md",
