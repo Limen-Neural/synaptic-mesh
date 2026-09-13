@@ -15,7 +15,7 @@ CI fails if they drift (issue #35 / LIM-1042).
 
 To bump MSRV:
 
-1. Set the new version in Cargo.toml, rust-toolchain.toml, README.md, and ci.yml.
+1. Set the new version in Cargo.toml, rust-toolchain.toml, README.md, ci.yml, and Dockerfile.
 2. Run the mandatory commands below on that toolchain
    (`rustup run <ver> cargo test --locked`, etc.).
 3. Confirm GitHub Actions is green.
