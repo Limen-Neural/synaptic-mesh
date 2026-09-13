@@ -38,7 +38,7 @@ This file contains workflow and orientation notes for AI agents working on this 
 - All `synaptic-mesh` work stays in `/home/raulmc/synaptic-mesh`.
 - Sister crate: `corinth-canal` at `/home/raulmc/corinth-canal` (inspiration for architecture patterns).
 - Run `cargo check`, `cargo test` before closing substantial Rust changes.
-- Commits and PR titles should keep carrying Linear identifiers (`LIM-xxxx`; LIM is the Limen-Neural Linear team key) so Linear Release scanning can attach issues.
+- Commits and PR titles should keep carrying Linear issue identifiers (Limen-Neural Linear team-number form) so Linear Release scanning can attach issues.
 - GitHub is source of truth for issue state.
 
 ## GitHub Actions secrets
