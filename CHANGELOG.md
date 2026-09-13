@@ -37,6 +37,14 @@ crate without any Limen context. Issue #37 promotes this section to
   `exclude` or a repo-only build dependency fails CI instead of crates.io
   (issue #36).
 
+### Fixed
+
+- **Sparse maps**: insertion and construction now validate source/target
+  indices against `N` with checked `u16` conversion, so column `65_536`
+  cannot wrap to target `0`. `N` is capped at 65,536 neurons. `to_gpu_arrays`
+  rejects `usize → u32` row-pointer overflow instead of truncating
+  (issue #63). Additive `try_*` helpers leave the map unchanged on error.
+
 ### Changed
 
 - **MSRV**: Rust pin raised from **1.97.1** to **1.98.1** in `Cargo.toml`
