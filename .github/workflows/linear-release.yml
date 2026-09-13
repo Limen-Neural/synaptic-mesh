@@ -45,7 +45,7 @@ jobs:
           fetch-depth: 0
 
       # Push to main: 0.3.0 (Linear In Progress). Tag: vMAJOR.MINOR.PATCH only
-      # (v0.3.0 → 0.3.0); anything else is empty and skips complete.
+      # (v0.3.0 → 0.3.0); anything else is empty and skips sync and complete.
       # workflow_dispatch: version input, default 0.3.0.
       - name: Resolve Linear release version
         id: version
@@ -75,6 +75,7 @@ jobs:
       # Main pushes and tag pushes always mutate. Same expression on complete so
       # a tag-ref dispatch with dry_run cannot mark a Linear release released.
       - name: Sync issues into Linear release
+        if: github.event_name != 'push' || github.ref_type != 'tag' || steps.version.outputs.version != ''
         uses: linear/linear-release-action@53ad0f863963e7f8e270fba18426bbb55ef55384 # v0
         with:
           access_key: ${{ secrets.LINEAR_ACCESS_KEY }}
