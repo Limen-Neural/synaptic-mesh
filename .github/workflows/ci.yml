@@ -11,8 +11,12 @@ permissions:
 
 jobs:
   validate:
-    name: Build & Test
-    runs-on: ubuntu-latest
+    name: Build & Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     permissions:
       contents: read
     steps:
@@ -29,6 +33,7 @@ jobs:
           components: clippy, rustfmt
 
       - name: Verify MSRV pins agree
+        # Git Bash: grep/sed and the here-string must run on Windows too.
         shell: bash
         run: |
           set -euo pipefail
@@ -83,7 +88,9 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      # rustfmt is OS-independent; keep this on Linux only (neuromod / axon-encoder).
       - name: Check formatting
+        if: runner.os == 'Linux'
         run: cargo fmt --check
 
       - name: Clippy (lint)
