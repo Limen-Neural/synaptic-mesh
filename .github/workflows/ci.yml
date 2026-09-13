@@ -104,6 +104,12 @@ jobs:
       - name: Test (test profile)
         run: cargo test --locked --all-features
 
+      # Release-mode tests: `debug_assert!` is stripped, so delay-buffer
+      # capacity and inject bounds must still reject invalid input (#60).
+      # Building the release profile alone is not enough.
+      - name: Test (release profile)
+        run: cargo test --locked --release --all-features
+
       # Exercises [profile.bench] (see #40/#41). Compile-only: no benches are
       # defined yet (#17), so this just confirms the profile itself is valid.
       - name: Bench compile check (bench profile)
