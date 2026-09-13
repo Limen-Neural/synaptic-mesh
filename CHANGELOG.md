@@ -65,9 +65,10 @@ crate without any Limen context. Issue #37 promotes this section to
   as ordinary Rust structs that bypass serde). Graph deserialization
   rejects signed weights that disagree with stored polarity, while
   accepting IEEE signed zero for both polarities.
-  `propagate_graded` rejects non-finite activations and non-finite
-  `weight * activation` products before mutating the delay buffer or tick
-  counters. `SynapseDescriptor::effective_weight` panics on invalid
+  `propagate_graded` rejects non-finite activations, non-finite
+  `weight * activation` products, and non-finite per-slot aggregates
+  (including existing delay-buffer current) before mutating the delay
+  buffer or tick counters. `SynapseDescriptor::effective_weight` panics on invalid
   magnitudes in release builds so a struct-literal negative inhibitory
   weight cannot flip sign. Invalid magnitudes are not silently
   `abs()`-normalized (issue #61).

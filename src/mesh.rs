@@ -200,8 +200,9 @@ impl SynapticMesh {
     ///   Non-zero values are treated as spikes; the activation value
     ///   scales the synaptic weight. Finite **signed** activations are
     ///   allowed (a negative activation inverts the delivered current).
-    ///   NaN, ±infinity, and non-finite `weight * activation` products are
-    ///   rejected before any buffer or tick mutation.
+    ///   NaN, ±infinity, non-finite `weight * activation` products, and
+    ///   non-finite per-slot aggregates (including current already in the
+    ///   delay buffer) are rejected before any buffer or tick mutation.
     pub fn propagate_graded(&mut self, source_activations: &[f32]) -> Result<Vec<f32>> {
         let n = self.graph.neuron_count();
         if source_activations.len() != n {
@@ -212,6 +213,9 @@ impl SynapticMesh {
             });
         }
 
+        // One traversal: validate each product, then group additions by
+        // (target, delay) so aggregates can be checked before any inject.
+        let mut pending: Vec<(usize, usize, f32)> = Vec::new();
         for (src, &activation) in source_activations.iter().enumerate() {
             if !activation.is_finite() {
                 return Err(MeshError::InvalidConfig(format!(
@@ -221,24 +225,28 @@ impl SynapticMesh {
             if activation.abs() < 1e-9 {
                 continue;
             }
-            for (_, weight, _, _) in self.graph.outgoing(src) {
+            for (target, weight, delay, _) in self.graph.outgoing(src) {
                 let current = weight * activation;
                 if !current.is_finite() {
                     return Err(MeshError::InvalidConfig(format!(
                         "propagate_graded source_activations[{src}] * synapse weight must be finite, got {current}"
                     )));
                 }
+                accumulate_slot_current(&mut pending, target as usize, delay as usize, current);
             }
         }
 
-        for (src, &activation) in source_activations.iter().enumerate() {
-            if activation.abs() < 1e-9 {
-                continue;
+        for &(target, delay, additional) in &pending {
+            let total = self.delay_buffer.scheduled_current(target, delay) + additional;
+            if !additional.is_finite() || !total.is_finite() {
+                return Err(MeshError::InvalidConfig(format!(
+                    "propagate_graded would produce a non-finite delay-buffer total for target {target}"
+                )));
             }
-            for (target, weight, delay, _polarity) in self.graph.outgoing(src) {
-                self.delay_buffer
-                    .inject(target as usize, weight * activation, delay as usize);
-            }
+        }
+
+        for (target, delay, additional) in pending {
+            self.delay_buffer.inject(target, additional, delay);
         }
 
         let currents = self.delay_buffer.drain_current_tick();
@@ -292,6 +300,22 @@ impl SynapticMesh {
     /// Export the CSR arrays + delays for GPU upload.
     pub fn to_gpu_arrays(&self) -> (Vec<u32>, Vec<u32>, Vec<f32>, Vec<u16>) {
         self.graph.to_gpu_arrays()
+    }
+}
+
+fn accumulate_slot_current(
+    pending: &mut Vec<(usize, usize, f32)>,
+    target: usize,
+    delay: usize,
+    current: f32,
+) {
+    if let Some((_, _, total)) = pending
+        .iter_mut()
+        .find(|(t, d, _)| *t == target && *d == delay)
+    {
+        *total += current;
+    } else {
+        pending.push((target, delay, current));
     }
 }
 
@@ -541,6 +565,90 @@ mod tests {
             (arrived[1] - 1.0).abs() < 1e-6,
             "in-flight current must be unchanged, got {}",
             arrived[1]
+        );
+    }
+
+    #[test]
+    fn propagate_graded_rejects_aggregate_overflow_before_mutation() {
+        use crate::types::{Polarity, SynapseDescriptor};
+        let graph = SynapticGraph::from_descriptors(
+            3,
+            &[
+                SynapseDescriptor {
+                    source: 0,
+                    target: 1,
+                    weight: f32::MAX,
+                    delay: 0,
+                    polarity: Polarity::Excitatory,
+                },
+                SynapseDescriptor {
+                    source: 2,
+                    target: 1,
+                    weight: f32::MAX,
+                    delay: 0,
+                    polarity: Polarity::Excitatory,
+                },
+            ],
+        )
+        .unwrap();
+        let mut mesh = SynapticMesh::new(graph);
+
+        let err = mesh.propagate_graded(&[1.0, 0.0, 1.0]).unwrap_err();
+        assert!(
+            err.to_string().contains("non-finite delay-buffer total"),
+            "unexpected error: {err}"
+        );
+        assert_eq!(mesh.tick(), 0);
+        let currents = mesh.propagate(&[false, false, false]).unwrap();
+        assert!(currents.iter().all(|&c| c == 0.0));
+    }
+
+    #[test]
+    fn propagate_graded_rejects_overflow_with_existing_buffer_current() {
+        use crate::types::{Polarity, SynapseDescriptor};
+        let graph = SynapticGraph::from_descriptors(
+            2,
+            &[
+                SynapseDescriptor {
+                    source: 0,
+                    target: 1,
+                    weight: f32::MAX,
+                    delay: 0,
+                    polarity: Polarity::Excitatory,
+                },
+                SynapseDescriptor {
+                    source: 0,
+                    target: 1,
+                    weight: f32::MAX,
+                    delay: 1,
+                    polarity: Polarity::Excitatory,
+                },
+            ],
+        )
+        .unwrap();
+        let mut mesh = SynapticMesh::new(graph);
+
+        // Parks f32::MAX in the delay-1 slot; delay-0 is drained this tick.
+        let first = mesh.propagate_graded(&[1.0, 0.0]).unwrap();
+        assert_eq!(first[1], f32::MAX);
+        assert_eq!(mesh.tick(), 1);
+
+        let err = mesh.propagate_graded(&[1.0, 0.0]).unwrap_err();
+        assert!(
+            err.to_string().contains("non-finite delay-buffer total"),
+            "unexpected error: {err}"
+        );
+        assert_eq!(
+            mesh.tick(),
+            1,
+            "tick must not advance on aggregate rejection"
+        );
+
+        let arrived = mesh.propagate(&[false, false]).unwrap();
+        assert_eq!(
+            arrived[1],
+            f32::MAX,
+            "parked delay-1 current must be unchanged"
         );
     }
 

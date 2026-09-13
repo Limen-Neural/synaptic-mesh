@@ -127,9 +127,30 @@ impl SpikeDelayBuffer {
                 depth.saturating_sub(1)
             )));
         }
-        let slot_idx = (self.current_tick as usize + delay) % depth;
+        let slot_idx = self.slot_index(delay);
         self.slots[slot_idx][target] += weight;
         Ok(())
+    }
+
+    /// Current scheduled at `target` for `delay` ticks from now.
+    #[inline]
+    pub(crate) fn scheduled_current(&self, target: usize, delay: usize) -> f32 {
+        debug_assert!(
+            delay <= self.max_delay,
+            "delay {delay} > max_delay {}",
+            self.max_delay
+        );
+        debug_assert!(
+            target < self.neuron_count,
+            "target {target} >= neuron_count {}",
+            self.neuron_count
+        );
+        self.slots[self.slot_index(delay)][target]
+    }
+
+    #[inline]
+    fn slot_index(&self, delay: usize) -> usize {
+        (self.current_tick as usize + delay) % self.slots.len()
     }
 
     /// Drain the current tick's accumulated synaptic currents.
@@ -138,7 +159,7 @@ impl SpikeDelayBuffer {
     /// current arriving at each neuron in this tick. The slot is zeroed
     /// after draining.
     pub fn drain_current_tick(&mut self) -> Vec<f32> {
-        let slot_idx = self.current_tick as usize % self.slots.len();
+        let slot_idx = self.slot_index(0);
         let currents = self.slots[slot_idx].clone();
         self.slots[slot_idx].fill(0.0);
         currents
