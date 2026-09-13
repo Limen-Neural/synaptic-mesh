@@ -21,9 +21,10 @@
 //! let currents = mesh.propagate(&spikes);
 //! ```
 
+use serde::de::{Deserializer, Error as DeError};
 use serde::{Deserialize, Serialize};
 
-use crate::delay::SpikeDelayBuffer;
+use crate::delay::{SpikeDelayBuffer, validate_current_tick};
 use crate::error::{MeshError, Result};
 use crate::topology::SynapticGraph;
 
@@ -32,7 +33,13 @@ use crate::topology::SynapticGraph;
 /// Owns the network topology (graph with weights, delays, polarities) and
 /// the temporal delay buffer. Converts source spikes into time-delayed
 /// synaptic currents delivered to target neurons.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+///
+/// Deserialization requires the graph and buffer neuron counts to agree,
+/// the buffer capacity to be at least the graph's maximum delay, and
+/// `tick` to equal `delay_buffer.current_tick`. Both ticks must leave
+/// headroom so one `propagate` cannot land on `usize::MAX`. Inconsistent
+/// timestamps are rejected rather than repaired.
+#[derive(Clone, Debug, Serialize)]
 pub struct SynapticMesh {
     /// The wiring diagram.
     graph: SynapticGraph,
@@ -40,6 +47,58 @@ pub struct SynapticMesh {
     delay_buffer: SpikeDelayBuffer,
     /// Current simulation tick.
     tick: u64,
+}
+
+#[derive(Deserialize)]
+struct RawSynapticMesh {
+    graph: SynapticGraph,
+    delay_buffer: SpikeDelayBuffer,
+    tick: u64,
+}
+
+impl RawSynapticMesh {
+    fn into_mesh(self) -> std::result::Result<SynapticMesh, String> {
+        if self.graph.neuron_count() != self.delay_buffer.neuron_count() {
+            return Err(format!(
+                "mesh graph neuron_count {} does not match delay buffer neuron_count {}",
+                self.graph.neuron_count(),
+                self.delay_buffer.neuron_count()
+            ));
+        }
+        let graph_max = usize::from(self.graph.max_delay());
+        if self.delay_buffer.max_delay() < graph_max {
+            return Err(format!(
+                "delay buffer max_delay {} is smaller than the graph's maximum delay {graph_max}",
+                self.delay_buffer.max_delay()
+            ));
+        }
+        let max_delay = self.delay_buffer.max_delay();
+        validate_current_tick(self.tick, max_delay)?;
+        validate_current_tick(self.delay_buffer.current_tick(), max_delay)?;
+        if self.tick != self.delay_buffer.current_tick() {
+            return Err(format!(
+                "mesh tick {} does not match delay buffer current_tick {}",
+                self.tick,
+                self.delay_buffer.current_tick()
+            ));
+        }
+        Ok(SynapticMesh {
+            graph: self.graph,
+            delay_buffer: self.delay_buffer,
+            tick: self.tick,
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for SynapticMesh {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        RawSynapticMesh::deserialize(deserializer)?
+            .into_mesh()
+            .map_err(DeError::custom)
+    }
 }
 
 impl SynapticMesh {
@@ -323,6 +382,118 @@ fn accumulate_slot_current(
 mod tests {
     use super::*;
     use crate::topology::{generate_layered, generate_random, generate_small_world};
+
+    fn two_neuron_delay_graph(delay: u16) -> SynapticGraph {
+        use crate::types::{Polarity, SynapseDescriptor};
+        SynapticGraph::from_descriptors(
+            2,
+            &[SynapseDescriptor {
+                source: 0,
+                target: 1,
+                weight: 1.0,
+                delay,
+                polarity: Polarity::Excitatory,
+            }],
+        )
+        .unwrap()
+    }
+
+    fn mesh_json_with_override(
+        mesh: &SynapticMesh,
+        patch: impl FnOnce(&mut serde_json::Value),
+    ) -> String {
+        let mut value = serde_json::to_value(mesh).unwrap();
+        patch(&mut value);
+        serde_json::to_string(&value).unwrap()
+    }
+
+    #[test]
+    fn deserialize_rejects_graph_buffer_neuron_count_mismatch() {
+        let mesh = SynapticMesh::new(two_neuron_delay_graph(0));
+        let json = mesh_json_with_override(&mesh, |v| {
+            v["delay_buffer"] = serde_json::to_value(SpikeDelayBuffer::new(3, 0)).unwrap();
+        });
+        assert!(serde_json::from_str::<SynapticMesh>(&json).is_err());
+    }
+
+    #[test]
+    fn deserialize_rejects_inadequate_buffer_capacity() {
+        let mesh = SynapticMesh::new(two_neuron_delay_graph(2));
+        let json = mesh_json_with_override(&mesh, |v| {
+            v["delay_buffer"] = serde_json::to_value(SpikeDelayBuffer::new(2, 1)).unwrap();
+        });
+        assert!(serde_json::from_str::<SynapticMesh>(&json).is_err());
+    }
+
+    #[test]
+    fn deserialize_rejects_tick_mismatch() {
+        let mesh = SynapticMesh::new(two_neuron_delay_graph(0));
+        let json = mesh_json_with_override(&mesh, |v| {
+            v["tick"] = serde_json::json!(3);
+        });
+        assert!(serde_json::from_str::<SynapticMesh>(&json).is_err());
+    }
+
+    #[test]
+    fn deserialize_rejects_tick_that_advances_to_usize_max() {
+        let tick = usize::MAX as u64 - 1;
+        for delay in [0_u16, 1] {
+            let mesh = SynapticMesh::new(two_neuron_delay_graph(delay));
+            let json = mesh_json_with_override(&mesh, |v| {
+                v["tick"] = serde_json::json!(tick);
+                v["delay_buffer"]["current_tick"] = serde_json::json!(tick);
+            });
+            assert!(
+                serde_json::from_str::<SynapticMesh>(&json).is_err(),
+                "synchronized tick usize::MAX - 1 with max_delay {delay} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn checkpoint_roundtrip_zero_delay_and_reset() {
+        let mut mesh = SynapticMesh::new(two_neuron_delay_graph(0));
+        let empty: SynapticMesh =
+            serde_json::from_str(&serde_json::to_string(&mesh).unwrap()).unwrap();
+        assert_eq!(empty.tick(), 0);
+
+        let _ = mesh.propagate(&[true, false]).unwrap();
+        mesh.reset();
+        let restored: SynapticMesh =
+            serde_json::from_str(&serde_json::to_string(&mesh).unwrap()).unwrap();
+        assert_eq!(restored.tick(), 0);
+        assert_eq!(
+            mesh.propagate(&[true, false]).unwrap(),
+            restored.clone().propagate(&[true, false]).unwrap()
+        );
+    }
+
+    #[test]
+    fn checkpoint_resume_with_spikes_in_flight_matches_live() {
+        let mut live = SynapticMesh::new(two_neuron_delay_graph(2));
+        // Inject an in-flight spike, then snapshot before it lands.
+        assert_eq!(live.propagate(&[true, false]).unwrap()[1], 0.0);
+        let json = serde_json::to_string(&live).unwrap();
+        let mut restored: SynapticMesh = serde_json::from_str(&json).unwrap();
+
+        // Continue both copies through more than one ring wrap (depth = 3).
+        let inputs = [
+            [false, false],
+            [true, false],
+            [false, false],
+            [false, false],
+            [true, false],
+            [false, false],
+            [false, false],
+            [false, false],
+        ];
+        for spikes in inputs {
+            let a = live.propagate(&spikes).unwrap();
+            let b = restored.propagate(&spikes).unwrap();
+            assert_eq!(a, b);
+            assert_eq!(live.tick(), restored.tick());
+        }
+    }
 
     #[test]
     fn try_with_max_delay_rejects_insufficient_capacity() {

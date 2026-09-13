@@ -18,6 +18,7 @@
 //! The ring buffer has `max_delay + 1` slots, each slot is a vector of
 //! length `neuron_count` accumulating incoming synaptic current.
 
+use serde::de::{Deserializer, Error as DeError};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{MeshError, Result};
@@ -32,7 +33,15 @@ use crate::error::{MeshError, Result};
 /// With `max_delay == 0` the buffer holds a single slot and every spike is
 /// delivered in the same tick it is injected, behaving as if there were no
 /// delay layer — it still allocates that one slot, one `f32` per neuron.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+///
+/// Deserialization re-validates the ring invariants: depth is
+/// `max_delay + 1` (checked, nonzero), every slot width equals
+/// `neuron_count`, every stored current is finite, `current_tick + max_delay`
+/// fits in `usize` so inject/drain slot arithmetic cannot overflow, and
+/// `current_tick` leaves one-tick headroom so `advance` cannot land on
+/// `usize::MAX`. Empty-neuron buffers (`neuron_count == 0`) remain legal
+/// when each slot is an empty vector.
+#[derive(Clone, Debug, Serialize)]
 pub struct SpikeDelayBuffer {
     /// Ring buffer: `slots[slot_index][neuron_id]` → accumulated current.
     slots: Vec<Vec<f32>>,
@@ -42,6 +51,98 @@ pub struct SpikeDelayBuffer {
     max_delay: usize,
     /// Current simulation tick.
     current_tick: u64,
+}
+
+#[derive(Deserialize)]
+struct RawSpikeDelayBuffer {
+    slots: Vec<Vec<f32>>,
+    neuron_count: usize,
+    max_delay: usize,
+    current_tick: u64,
+}
+
+impl RawSpikeDelayBuffer {
+    fn into_buffer(self) -> std::result::Result<SpikeDelayBuffer, String> {
+        validate_delay_buffer_shape(&self.slots, self.neuron_count, self.max_delay)?;
+        validate_current_tick(self.current_tick, self.max_delay)?;
+        Ok(SpikeDelayBuffer {
+            slots: self.slots,
+            neuron_count: self.neuron_count,
+            max_delay: self.max_delay,
+            current_tick: self.current_tick,
+        })
+    }
+}
+
+/// Ring depth must be `max_delay + 1` (nonzero, no overflow) and every
+/// slot must have width `neuron_count` with only finite currents.
+fn validate_delay_buffer_shape(
+    slots: &[Vec<f32>],
+    neuron_count: usize,
+    max_delay: usize,
+) -> std::result::Result<(), String> {
+    let expected_depth = max_delay.checked_add(1).ok_or_else(|| {
+        format!("max_delay {max_delay} + 1 overflows usize; delay buffer depth is invalid")
+    })?;
+    if slots.is_empty() {
+        return Err("delay buffer slots must be non-empty".into());
+    }
+    if slots.len() != expected_depth {
+        return Err(format!(
+            "delay buffer depth {} does not match max_delay + 1 ({expected_depth})",
+            slots.len()
+        ));
+    }
+    for (i, slot) in slots.iter().enumerate() {
+        if slot.len() != neuron_count {
+            return Err(format!(
+                "delay buffer slot {i} width {} does not match neuron_count {neuron_count}",
+                slot.len()
+            ));
+        }
+        if slot.iter().any(|v| !v.is_finite()) {
+            return Err(format!(
+                "delay buffer slot {i} contains a non-finite current; refusing to poison later drain_current_tick sums"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// `advance` (`+= 1`) must not land on `usize::MAX`, and
+/// `current_tick + max_delay` must fit in `usize` so inject slot arithmetic
+/// cannot wrap.
+pub(crate) fn validate_current_tick(
+    current_tick: u64,
+    max_delay: usize,
+) -> std::result::Result<(), String> {
+    if current_tick >= usize::MAX as u64 {
+        return Err("current_tick is too large for safe advancement and indexing".into());
+    }
+    let max_safe_tick = (usize::MAX as u64).saturating_sub(max_delay as u64);
+    if current_tick > max_safe_tick {
+        return Err(format!(
+            "current_tick {current_tick} is too large to add max_delay {max_delay} without overflowing usize indexing"
+        ));
+    }
+    // One subsequent `+= 1` must stay strictly below `usize::MAX`, even when
+    // `max_delay` is 0 or 1 and inject arithmetic would otherwise allow
+    // `current_tick == usize::MAX - 1`.
+    if current_tick >= (usize::MAX as u64).saturating_sub(1) {
+        return Err("current_tick is too large for safe advancement and indexing".into());
+    }
+    Ok(())
+}
+
+impl<'de> Deserialize<'de> for SpikeDelayBuffer {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        RawSpikeDelayBuffer::deserialize(deserializer)?
+            .into_buffer()
+            .map_err(DeError::custom)
+    }
 }
 
 impl SpikeDelayBuffer {
@@ -148,9 +249,14 @@ impl SpikeDelayBuffer {
         self.slots[self.slot_index(delay)][target]
     }
 
+    /// Reduce `current_tick` modulo ring depth before adding `delay` so
+    /// `current_tick + delay` cannot overflow `usize`.
     #[inline]
     fn slot_index(&self, delay: usize) -> usize {
-        (self.current_tick as usize + delay) % self.slots.len()
+        let depth = self.slots.len();
+        debug_assert!(depth > 0);
+        let tick_mod = (self.current_tick % depth as u64) as usize;
+        tick_mod.wrapping_add(delay) % depth
     }
 
     /// Drain the current tick's accumulated synaptic currents.
@@ -340,21 +446,126 @@ mod tests {
     }
 
     #[test]
-    fn try_inject_rejects_delay_that_exceeds_deserialized_depth() {
-        // Derived Deserialize still accepts slots.len() < max_delay + 1.
-        // A delay within max_delay must not wrap through modulo onto an
-        // earlier tick.
-        let json = r#"{"slots":[[0.0]],"neuron_count":1,"max_delay":1,"current_tick":0}"#;
-        let mut buf: SpikeDelayBuffer = serde_json::from_str(json).unwrap();
-        assert!(buf.try_inject(0, 1.0, 1).is_err());
-        let currents = buf.drain_current_tick();
-        assert_eq!(currents[0], 0.0);
-    }
-
-    #[test]
     #[should_panic(expected = "overflow")]
     fn new_rejects_max_delay_plus_one_overflow() {
         let _ = SpikeDelayBuffer::new(1, usize::MAX);
+    }
+
+    #[test]
+    fn deserialize_rejects_empty_slots() {
+        let json = r#"{"slots":[],"neuron_count":2,"max_delay":1,"current_tick":0}"#;
+        assert!(serde_json::from_str::<SpikeDelayBuffer>(json).is_err());
+    }
+
+    #[test]
+    fn deserialize_rejects_wrong_depth() {
+        let json = r#"{"slots":[[0.0,0.0]],"neuron_count":2,"max_delay":1,"current_tick":0}"#;
+        assert!(serde_json::from_str::<SpikeDelayBuffer>(json).is_err());
+    }
+
+    #[test]
+    fn deserialize_rejects_ragged_slot_widths() {
+        let json = r#"{"slots":[[0.0,0.0],[0.0]],"neuron_count":2,"max_delay":1,"current_tick":0}"#;
+        assert!(serde_json::from_str::<SpikeDelayBuffer>(json).is_err());
+    }
+
+    #[test]
+    fn deserialize_rejects_max_delay_plus_one_overflow() {
+        let json =
+            r#"{"slots":[],"neuron_count":1,"max_delay":18446744073709551615,"current_tick":0}"#;
+        assert!(serde_json::from_str::<SpikeDelayBuffer>(json).is_err());
+        assert!(validate_delay_buffer_shape(&[], 1, usize::MAX).is_err());
+    }
+
+    #[test]
+    fn deserialize_rejects_current_tick_at_u64_max() {
+        let json = r#"{"slots":[[0.0],[0.0]],"neuron_count":1,"max_delay":1,"current_tick":18446744073709551615}"#;
+        assert!(serde_json::from_str::<SpikeDelayBuffer>(json).is_err());
+        assert!(validate_current_tick(u64::MAX, 1).is_err());
+        assert!(validate_current_tick(usize::MAX as u64, 1).is_err());
+        assert!(validate_current_tick(0, 1).is_ok());
+    }
+
+    #[test]
+    fn deserialize_rejects_current_tick_that_advances_to_usize_max() {
+        let tick = usize::MAX as u64 - 1;
+        let json_delay0 =
+            format!(r#"{{"slots":[[0.0]],"neuron_count":1,"max_delay":0,"current_tick":{tick}}}"#);
+        let json_delay1 = format!(
+            r#"{{"slots":[[0.0],[0.0]],"neuron_count":1,"max_delay":1,"current_tick":{tick}}}"#
+        );
+        assert!(serde_json::from_str::<SpikeDelayBuffer>(&json_delay0).is_err());
+        assert!(serde_json::from_str::<SpikeDelayBuffer>(&json_delay1).is_err());
+        assert!(validate_current_tick(tick, 0).is_err());
+        assert!(validate_current_tick(tick, 1).is_err());
+        assert!(validate_current_tick(usize::MAX as u64 - 2, 0).is_ok());
+        assert!(validate_current_tick(usize::MAX as u64 - 2, 1).is_ok());
+    }
+
+    #[test]
+    fn deserialize_rejects_current_tick_that_overflows_inject_arithmetic() {
+        let tick = usize::MAX as u64 - 1;
+        let json = format!(
+            r#"{{"slots":[[0.0],[0.0],[0.0]],"neuron_count":1,"max_delay":2,"current_tick":{tick}}}"#
+        );
+        let err = serde_json::from_str::<SpikeDelayBuffer>(&json).unwrap_err();
+        assert!(
+            err.to_string().contains("overflowing usize indexing"),
+            "unexpected error: {err}"
+        );
+        assert!(validate_current_tick(tick, 2).is_err());
+        // Boundary: current_tick + max_delay == usize::MAX is still safe.
+        assert!(validate_current_tick(usize::MAX as u64 - 2, 2).is_ok());
+    }
+
+    #[test]
+    fn deserialize_accepts_current_tick_at_inject_arithmetic_limit() {
+        let tick = usize::MAX as u64 - 2;
+        let json = format!(
+            r#"{{"slots":[[0.0],[0.0],[0.0]],"neuron_count":1,"max_delay":2,"current_tick":{tick}}}"#
+        );
+        let mut buf: SpikeDelayBuffer = serde_json::from_str(&json).unwrap();
+        buf.inject(0, 1.0, 2);
+        assert_eq!(buf.current_tick(), tick);
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    #[test]
+    fn deserialize_rejects_current_tick_that_wraps_usize() {
+        let json =
+            r#"{"slots":[[0.0],[0.0]],"neuron_count":1,"max_delay":1,"current_tick":4294967296}"#;
+        assert!(serde_json::from_str::<SpikeDelayBuffer>(json).is_err());
+        assert!(validate_current_tick((usize::MAX as u64) + 1, 1).is_err());
+    }
+
+    #[test]
+    fn validate_delay_buffer_shape_rejects_non_finite_currents() {
+        // JSON has no NaN/Infinity literal; a non-JSON serde format could
+        // otherwise smuggle these values into drain_current_tick sums.
+        assert!(validate_delay_buffer_shape(&[vec![0.1], vec![f32::NAN]], 1, 1).is_err());
+        assert!(validate_delay_buffer_shape(&[vec![f32::INFINITY], vec![0.0]], 1, 1).is_err());
+        assert!(validate_delay_buffer_shape(&[vec![0.0], vec![f32::NEG_INFINITY]], 1, 1).is_err());
+        assert!(validate_delay_buffer_shape(&[vec![0.1, -0.0], vec![2.0, 0.0]], 2, 1).is_ok());
+    }
+
+    #[test]
+    fn deserialize_accepts_zero_neuron_and_zero_delay() {
+        let json = r#"{"slots":[[]],"neuron_count":0,"max_delay":0,"current_tick":0}"#;
+        let buf: SpikeDelayBuffer = serde_json::from_str(json).unwrap();
+        assert_eq!(buf.neuron_count(), 0);
+        assert_eq!(buf.max_delay(), 0);
+    }
+
+    #[test]
+    fn serialize_roundtrip_preserves_in_flight_current() {
+        let mut buf = SpikeDelayBuffer::new(2, 1);
+        buf.inject(1, 0.5, 1);
+        let json = serde_json::to_string(&buf).unwrap();
+        let mut restored: SpikeDelayBuffer = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.current_tick(), 0);
+        assert_eq!(restored.drain_current_tick()[1], 0.0);
+        restored.advance();
+        assert!((restored.drain_current_tick()[1] - 0.5).abs() < 1e-6);
     }
 
     #[test]
