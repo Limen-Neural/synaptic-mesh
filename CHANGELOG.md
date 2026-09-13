@@ -68,7 +68,7 @@ crate without any Limen context. Issue #37 promotes this section to
   `topology`, `routing` — `lif` (no neuron models live here) and `spikenaut`
   (a downstream consumer, not a description of the crate) were dropped
   (issue #53).
-- **Packaging**: `exclude` now also drops `/.github/`, `/qodana.yaml`, and
+- **Packaging**: `exclude` now also drops `/.github/` and
   `/REVIEW.md` from the published `.crate` (issue #34), plus the remaining
   dev-tooling files `/.codacy.yml`, `/.devin/`, `/.gitignore`, `/AGENTS.md`,
   `/deny.toml`, and `/rust-toolchain.toml` (issue #49). The packaged crate
