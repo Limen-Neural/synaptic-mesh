@@ -1,6 +1,10 @@
 /target
 /AGENTS.md
 
+# Coverage artifacts generated locally or by the Codecov workflow
+lcov.info
+junit.xml
+
 # IDE / Editor
 .idea/
 .vscode/
