@@ -10,7 +10,10 @@ use serde::de::{Deserializer, Error as DeError};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{MeshError, Result};
-use crate::types::{DelayTicks, NeuronId, Polarity, SynapseDescriptor};
+use crate::types::{
+    DelayTicks, NeuronId, Polarity, SynapseDescriptor, invalid_signed_weight_polarity_msg,
+    invalid_weight_magnitude_msg, signed_weight_agrees_with_polarity, weight_magnitude_is_valid,
+};
 
 /// Adjacency structure for a spiking neural network with delay and polarity metadata.
 ///
@@ -72,6 +75,7 @@ impl RawSynapticGraph {
         )?;
         validate_targets_in_bounds(&self.targets, self.neuron_count)?;
         validate_weights_finite(&self.weights)?;
+        validate_weights_agree_with_polarities(&self.weights, &self.polarities)?;
 
         Ok(SynapticGraph {
             neuron_count: self.neuron_count,
@@ -142,6 +146,20 @@ fn validate_weights_finite(weights: &[f32]) -> std::result::Result<(), String> {
     Ok(())
 }
 
+/// Signed CSR weight must agree with the stored polarity. Zero, including
+/// IEEE signed zero, is accepted for both polarities.
+fn validate_weights_agree_with_polarities(
+    weights: &[f32],
+    polarities: &[Polarity],
+) -> std::result::Result<(), String> {
+    for (&weight, &polarity) in weights.iter().zip(polarities.iter()) {
+        if !signed_weight_agrees_with_polarity(weight, polarity) {
+            return Err(invalid_signed_weight_polarity_msg(weight, polarity));
+        }
+    }
+    Ok(())
+}
+
 impl<'de> Deserialize<'de> for SynapticGraph {
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
@@ -169,11 +187,15 @@ impl SynapticGraph {
     /// Build from a list of synapse descriptors.
     ///
     /// Descriptors need not be sorted; they will be grouped by source neuron.
+    /// Each descriptor `weight` must be a finite non-negative magnitude
+    /// (IEEE signed zero is accepted). Negative, NaN, and infinite
+    /// magnitudes are rejected — they are not `abs()`-normalized.
     pub fn from_descriptors(
         neuron_count: usize,
         descriptors: &[SynapseDescriptor],
     ) -> Result<Self> {
         Self::validate_descriptor_indices(neuron_count, descriptors)?;
+        Self::validate_descriptor_weights(descriptors)?;
 
         // Count edges per source neuron
         let mut counts = vec![0usize; neuron_count];
@@ -240,6 +262,19 @@ impl SynapticGraph {
                     index: desc.target as usize,
                     max: neuron_count.saturating_sub(1),
                 });
+            }
+        }
+        Ok(())
+    }
+
+    /// Reject negative, NaN, and infinite descriptor magnitudes. IEEE signed
+    /// zero (`-0.0`) is a valid non-negative magnitude.
+    fn validate_descriptor_weights(descriptors: &[SynapseDescriptor]) -> Result<()> {
+        for desc in descriptors {
+            if !weight_magnitude_is_valid(desc.weight) {
+                return Err(MeshError::InvalidConfig(invalid_weight_magnitude_msg(
+                    desc.weight,
+                )));
             }
         }
         Ok(())
@@ -493,5 +528,93 @@ mod tests {
             polarity: Polarity::Excitatory,
         }];
         assert!(SynapticGraph::from_descriptors(3, &descs).is_err());
+    }
+
+    fn descriptor(weight: f32, polarity: Polarity) -> SynapseDescriptor {
+        SynapseDescriptor {
+            source: 0,
+            target: 1,
+            weight,
+            delay: 0,
+            polarity,
+        }
+    }
+
+    #[test]
+    fn from_descriptors_rejects_negative_inhibitory_magnitude() {
+        // Direct Rust construction bypasses serde; the graph loader must not
+        // turn this into an excitatory +0.5 via effective_weight().
+        let invalid = descriptor(-0.5, Polarity::Inhibitory);
+        assert!(SynapticGraph::from_descriptors(2, &[invalid]).is_err());
+    }
+
+    #[test]
+    fn from_descriptors_rejects_nan_and_infinite_magnitudes() {
+        assert!(
+            SynapticGraph::from_descriptors(2, &[descriptor(f32::NAN, Polarity::Excitatory)])
+                .is_err()
+        );
+        assert!(
+            SynapticGraph::from_descriptors(2, &[descriptor(f32::INFINITY, Polarity::Excitatory)])
+                .is_err()
+        );
+        assert!(
+            SynapticGraph::from_descriptors(
+                2,
+                &[descriptor(f32::NEG_INFINITY, Polarity::Inhibitory)]
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn from_descriptors_accepts_zero_and_positive_magnitudes() {
+        let zero = SynapticGraph::from_descriptors(2, &[descriptor(0.0, Polarity::Inhibitory)]);
+        assert!(zero.is_ok());
+        let signed_zero =
+            SynapticGraph::from_descriptors(2, &[descriptor(-0.0, Polarity::Excitatory)]);
+        assert!(signed_zero.is_ok());
+        let positive = SynapticGraph::from_descriptors(2, &[descriptor(0.5, Polarity::Excitatory)]);
+        assert!(positive.is_ok());
+        let edges: Vec<_> = positive.unwrap().outgoing(0).collect();
+        assert!((edges[0].1 - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn deserialize_rejects_positive_inhibitory_weight() {
+        let json = r#"{"neuron_count":2,"row_ptr":[0,1,1],"targets":[1],"weights":[0.5],"delays":[0],"polarities":["Inhibitory"]}"#;
+        assert!(serde_json::from_str::<SynapticGraph>(json).is_err());
+    }
+
+    #[test]
+    fn deserialize_rejects_negative_excitatory_weight() {
+        let json = r#"{"neuron_count":2,"row_ptr":[0,1,1],"targets":[1],"weights":[-0.5],"delays":[0],"polarities":["Excitatory"]}"#;
+        assert!(serde_json::from_str::<SynapticGraph>(json).is_err());
+    }
+
+    #[test]
+    fn deserialize_accepts_zero_weight_for_both_polarities() {
+        let inh = r#"{"neuron_count":2,"row_ptr":[0,1,1],"targets":[1],"weights":[0.0],"delays":[0],"polarities":["Inhibitory"]}"#;
+        let exc = r#"{"neuron_count":2,"row_ptr":[0,1,1],"targets":[1],"weights":[0.0],"delays":[0],"polarities":["Excitatory"]}"#;
+        assert!(serde_json::from_str::<SynapticGraph>(inh).is_ok());
+        assert!(serde_json::from_str::<SynapticGraph>(exc).is_ok());
+    }
+
+    #[test]
+    fn validate_weights_agree_with_polarities_rejects_nan_without_json() {
+        // JSON cannot represent NaN/Inf; a binary serde format could.
+        assert!(
+            validate_weights_agree_with_polarities(&[f32::NAN], &[Polarity::Excitatory]).is_err()
+        );
+        assert!(
+            validate_weights_agree_with_polarities(&[f32::INFINITY], &[Polarity::Inhibitory])
+                .is_err()
+        );
+        assert!(
+            validate_weights_agree_with_polarities(&[f32::NEG_INFINITY], &[Polarity::Excitatory])
+                .is_err()
+        );
+        assert!(validate_weights_agree_with_polarities(&[-0.0], &[Polarity::Inhibitory]).is_ok());
+        assert!(validate_weights_agree_with_polarities(&[0.0], &[Polarity::Excitatory]).is_ok());
     }
 }

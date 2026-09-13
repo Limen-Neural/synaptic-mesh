@@ -64,9 +64,66 @@ pub struct SynapseDescriptor {
 }
 
 impl SynapseDescriptor {
-    /// Effective signed weight: `|weight| × polarity.sign()`.
+    /// Effective signed weight: `weight × polarity.sign()`.
+    ///
+    /// `weight` is a non-negative magnitude. Invalid magnitudes are rejected
+    /// by [`crate::topology::SynapticGraph::from_descriptors`] and by
+    /// descriptor deserialization rather than being silently `abs()`-normalized
+    /// here.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `weight` is negative, NaN, or infinite. Ordinary Rust struct
+    /// literals can still construct those values; this check runs in release
+    /// builds so a negative inhibitory magnitude cannot flip sign.
     pub fn effective_weight(&self) -> f32 {
+        assert!(
+            weight_magnitude_is_valid(self.weight),
+            "synapse weight must be finite and non-negative, got {}",
+            self.weight
+        );
         self.weight * self.polarity.sign()
+    }
+}
+
+/// `true` when `weight` is a finite magnitude, including IEEE `+0.0` and `-0.0`.
+///
+/// `-0.0 < 0.0` is false, so signed zero is accepted rather than rejected as
+/// a negative magnitude.
+pub(crate) fn weight_magnitude_is_valid(weight: f32) -> bool {
+    weight.is_finite() && weight >= 0.0
+}
+
+/// Error text for an invalid descriptor magnitude (negative, NaN, or infinite).
+pub(crate) fn invalid_weight_magnitude_msg(weight: f32) -> String {
+    format!("synapse weight must be finite and non-negative, got {weight}")
+}
+
+/// CSR graphs store **signed** weights. Zero (including signed zero) is valid
+/// for both polarities; a strictly positive inhibitory weight or a strictly
+/// negative excitatory weight is not.
+pub(crate) fn signed_weight_agrees_with_polarity(weight: f32, polarity: Polarity) -> bool {
+    if !weight.is_finite() {
+        return false;
+    }
+    match polarity {
+        Polarity::Excitatory => weight >= 0.0,
+        Polarity::Inhibitory => weight <= 0.0,
+    }
+}
+
+/// Error text for a signed CSR weight that disagrees with its polarity.
+pub(crate) fn invalid_signed_weight_polarity_msg(weight: f32, polarity: Polarity) -> String {
+    if !weight.is_finite() {
+        return format!("synapse weight must be finite, got {weight}");
+    }
+    match polarity {
+        Polarity::Excitatory => {
+            format!("excitatory synapse weight must be >= 0 (signed zero allowed), got {weight}")
+        }
+        Polarity::Inhibitory => {
+            format!("inhibitory synapse weight must be <= 0 (signed zero allowed), got {weight}")
+        }
     }
 }
 
@@ -78,10 +135,8 @@ where
     D: Deserializer<'de>,
 {
     let weight = f32::deserialize(deserializer)?;
-    if !weight.is_finite() || weight < 0.0 {
-        return Err(DeError::custom(format!(
-            "synapse weight must be finite and non-negative, got {weight}"
-        )));
+    if !weight_magnitude_is_valid(weight) {
+        return Err(DeError::custom(invalid_weight_magnitude_msg(weight)));
     }
     Ok(weight)
 }
@@ -191,5 +246,85 @@ mod tests {
         let desc: SynapseDescriptor = serde_json::from_str(json).unwrap();
         assert_eq!(desc.weight, 0.5);
         assert!((desc.effective_weight() + 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn deserialize_accepts_zero_weight() {
+        let json = r#"{"source":0,"target":1,"weight":0.0,"delay":1,"polarity":"Excitatory"}"#;
+        let desc: SynapseDescriptor = serde_json::from_str(json).unwrap();
+        assert_eq!(desc.weight, 0.0);
+        assert_eq!(desc.effective_weight(), 0.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "synapse weight must be finite and non-negative")]
+    fn effective_weight_panics_on_negative_inhibitory_magnitude() {
+        let desc = SynapseDescriptor {
+            source: 0,
+            target: 1,
+            weight: -0.5,
+            delay: 1,
+            polarity: Polarity::Inhibitory,
+        };
+        let _ = desc.effective_weight();
+    }
+
+    #[test]
+    fn weight_magnitude_accepts_signed_zero_and_rejects_non_finite() {
+        assert!(weight_magnitude_is_valid(0.0));
+        assert!(weight_magnitude_is_valid(-0.0));
+        assert!(weight_magnitude_is_valid(0.5));
+        assert!(!weight_magnitude_is_valid(-0.5));
+        assert!(!weight_magnitude_is_valid(f32::NAN));
+        assert!(!weight_magnitude_is_valid(f32::INFINITY));
+        assert!(!weight_magnitude_is_valid(f32::NEG_INFINITY));
+    }
+
+    #[test]
+    fn signed_weight_polarity_accepts_signed_zero_for_both() {
+        assert!(signed_weight_agrees_with_polarity(
+            0.0,
+            Polarity::Excitatory
+        ));
+        assert!(signed_weight_agrees_with_polarity(
+            -0.0,
+            Polarity::Excitatory
+        ));
+        assert!(signed_weight_agrees_with_polarity(
+            0.0,
+            Polarity::Inhibitory
+        ));
+        assert!(signed_weight_agrees_with_polarity(
+            -0.0,
+            Polarity::Inhibitory
+        ));
+        assert!(signed_weight_agrees_with_polarity(
+            0.5,
+            Polarity::Excitatory
+        ));
+        assert!(signed_weight_agrees_with_polarity(
+            -0.5,
+            Polarity::Inhibitory
+        ));
+        assert!(!signed_weight_agrees_with_polarity(
+            -0.5,
+            Polarity::Excitatory
+        ));
+        assert!(!signed_weight_agrees_with_polarity(
+            0.5,
+            Polarity::Inhibitory
+        ));
+        assert!(!signed_weight_agrees_with_polarity(
+            f32::NAN,
+            Polarity::Excitatory
+        ));
+        assert!(!signed_weight_agrees_with_polarity(
+            f32::INFINITY,
+            Polarity::Inhibitory
+        ));
+        assert!(!signed_weight_agrees_with_polarity(
+            f32::NEG_INFINITY,
+            Polarity::Excitatory
+        ));
     }
 }
