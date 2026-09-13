@@ -45,6 +45,13 @@ crate without any Limen context. Issue #37 promotes this section to
   rejects `usize → u32` row-pointer overflow instead of truncating
   (issue #63). Additive `try_*` helpers leave the map unchanged on error.
 
+### Removed
+
+- **CI**: the Qodana workflow (`.github/workflows/qodana_code_quality.yml`)
+  and `qodana.yaml`. Qodana Cloud membership expired, so the scan job was
+  failing on license token decline. Build & Test, cargo-deny, and the
+  crates.io package dry-run are unchanged.
+
 ### Changed
 
 - **MSRV**: Rust pin raised from **1.97.1** to **1.98.1** in `Cargo.toml`

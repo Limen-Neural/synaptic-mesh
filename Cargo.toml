@@ -20,7 +20,6 @@ categories = ["science", "algorithms", "simulation"]
 exclude = [
     "/docs/",
     "/.github/",
-    "/qodana.yaml",
     "/REVIEW.md",
     "/.codacy.yml",
     "/.devin/",
