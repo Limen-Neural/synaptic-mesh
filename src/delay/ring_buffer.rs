@@ -70,7 +70,7 @@ impl SpikeDelayBuffer {
     pub fn try_new(neuron_count: usize, max_delay: usize) -> Result<Self> {
         let depth = max_delay.checked_add(1).ok_or_else(|| {
             MeshError::DelayError(format!(
-                "max_delay {max_delay} + 1 overflows usize; cannot allocate a zero-depth buffer"
+                "max_delay {max_delay} + 1 overflows usize; ring depth cannot be represented"
             ))
         })?;
         Ok(Self {
@@ -117,11 +117,15 @@ impl SpikeDelayBuffer {
                 max: self.neuron_count.saturating_sub(1),
             });
         }
-        // Depth is `max_delay + 1` and constructors reject overflow, so
-        // the ring is never empty for a successfully constructed buffer.
+        // Constructors keep depth == max_delay + 1, but a deserialized
+        // ring can still be shorter. Refuse delay >= depth so we never
+        // wrap onto an earlier tick.
         let depth = self.slots.len();
-        if depth == 0 {
-            return Err(MeshError::DelayError("delay buffer has zero depth".into()));
+        if depth == 0 || delay >= depth {
+            return Err(MeshError::DelayError(format!(
+                "delay {delay} exceeds buffer depth {}",
+                depth.saturating_sub(1)
+            )));
         }
         let slot_idx = (self.current_tick as usize + delay) % depth;
         self.slots[slot_idx][target] += weight;
@@ -309,9 +313,21 @@ mod tests {
         let err = SpikeDelayBuffer::try_new(1, usize::MAX).unwrap_err();
         let msg = err.to_string();
         assert!(
-            msg.contains("overflow"),
+            msg.contains("overflows usize") && msg.contains("ring depth cannot be represented"),
             "expected overflow error, got {msg}"
         );
+    }
+
+    #[test]
+    fn try_inject_rejects_delay_that_exceeds_deserialized_depth() {
+        // Derived Deserialize still accepts slots.len() < max_delay + 1.
+        // A delay within max_delay must not wrap through modulo onto an
+        // earlier tick.
+        let json = r#"{"slots":[[0.0]],"neuron_count":1,"max_delay":1,"current_tick":0}"#;
+        let mut buf: SpikeDelayBuffer = serde_json::from_str(json).unwrap();
+        assert!(buf.try_inject(0, 1.0, 1).is_err());
+        let currents = buf.drain_current_tick();
+        assert_eq!(currents[0], 0.0);
     }
 
     #[test]
