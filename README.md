@@ -81,6 +81,27 @@ Contributors: see
 [REVIEW.md](https://github.com/Limen-Neural/synaptic-mesh/blob/main/REVIEW.md#build-profiles)
 for which cargo build profile (`dev`, `test`, `release`, `bench`) to use and why.
 
+## Docker (optional)
+
+Published images are a **docs snapshot** for release packaging (not a
+substitute for depending on the crate from Cargo). This crate has no
+example binaries.
+
+```bash
+docker pull ghcr.io/limen-neural/synaptic-mesh:0.3.0
+docker run --rm ghcr.io/limen-neural/synaptic-mesh:0.3.0
+```
+
+Build locally from a git checkout:
+
+```bash
+docker build -t synaptic-mesh:dev .
+docker run --rm synaptic-mesh:dev
+
+docker build --target builder -t synaptic-mesh:builder .
+docker run --rm synaptic-mesh:builder   # cargo test --all-features --locked
+```
+
 ## Quick Start: Building a Mesh
 
 ```rust

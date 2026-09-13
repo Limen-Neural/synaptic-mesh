@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Packaging**: Docker + GHCR container for releases (`ghcr.io/limen-neural/synaptic-mesh`).
+  Library crate (no `examples/` / `[[bin]]`), so the image is a rustdoc snapshot
+  plus a version stamp rather than a fake binary. PR workflow verifies without
+  pushing; `main` publishes SHA tags; `v*` tags also publish version + `latest`
+  (issue #78 / LIM-1178).
+
 ## [0.3.0] - 2026-09-13
 
 Everything below ships as **0.3.0**, the first crates.io release: packaging,

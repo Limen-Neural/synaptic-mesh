@@ -7,9 +7,10 @@ Run them before claiming a PR is ready when the change touches `src/`,
 ## MSRV pin rule
 
 `Cargo.toml` `rust-version`, `rust-toolchain.toml` `channel`, the README's
-**MSRV** line, and every `toolchain:` / `rust-version:` pin in
+**MSRV** line, every `toolchain:` / `rust-version:` pin in
 `.github/workflows/ci.yml` (the toolchain install, the packaging job, and
-the `cargo-deny` action) must stay **identical** (currently **1.98.1**).
+the `cargo-deny` action), and the `rust:` tag in `Dockerfile` must stay
+**identical** (currently **1.98.1**).
 CI fails if they drift (issue #35 / LIM-1042).
 
 To bump MSRV:
