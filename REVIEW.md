@@ -11,8 +11,7 @@ Run them before claiming a PR is ready when the change touches `src/`,
 `.github/workflows/ci.yml` (the toolchain install, the packaging job, and
 the `cargo-deny` action) and `.github/workflows/coverage.yml` must stay
 **identical** (currently **1.98.1**). The `validate` job in `ci.yml`
-checks `ci.yml` pins; keep `coverage.yml` on the same version by hand
-(issue #35 / LIM-1042).
+checks both `ci.yml` and `coverage.yml` pins (issue #35 / LIM-1042).
 
 To bump MSRV:
 
