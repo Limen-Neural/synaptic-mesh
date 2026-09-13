@@ -45,7 +45,7 @@ jobs:
           tool: nextest@0.9.70
 
       - name: Generate coverage (lcov) + JUnit (single nextest pass via llvm-cov integration)
-        run: cargo llvm-cov nextest --all-features --profile ci --lcov --output-path lcov.info
+        run: cargo llvm-cov nextest --locked --all-features --profile ci --lcov --output-path lcov.info
 
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}
