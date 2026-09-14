@@ -12,10 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Crate rename**: the Cargo package is now `synaptic-wiring` (was
   `synaptic-mesh`) so the first crates.io publish does not collide with
   [ruvnet/Synaptic-Mesh](https://github.com/ruvnet/Synaptic-Mesh). GitHub
-  URLs point at [`Limen-Neural/synaptic-wiring`](https://github.com/Limen-Neural/synaptic-wiring);
-  the GitHub repository may still be `synaptic-mesh` until that rename
-  lands (GitHub redirects the old path). The `SynapticMesh` type is
-  unchanged.
+  URLs point at [`Limen-Neural/synaptic-wiring`](https://github.com/Limen-Neural/synaptic-wiring)
+  (the GitHub repository rename has landed; the old `synaptic-mesh` path
+  redirects). The `SynapticMesh` type is unchanged.
 
 ### Added
 

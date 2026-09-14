@@ -19,11 +19,9 @@ this crate wires the network and delivers each spike to the right target on the
 right tick.
 
 The Cargo package is `synaptic-wiring` (this crate was previously named
-`synaptic-mesh`). GitHub URLs in this tree point at
-[`Limen-Neural/synaptic-wiring`](https://github.com/Limen-Neural/synaptic-wiring);
-until the GitHub repository rename lands, the current remote
-[`Limen-Neural/synaptic-mesh`](https://github.com/Limen-Neural/synaptic-mesh)
-still hosts the code and GitHub will redirect the new path.
+`synaptic-mesh`). The GitHub repository is
+[`Limen-Neural/synaptic-wiring`](https://github.com/Limen-Neural/synaptic-wiring)
+(GitHub redirects the former `Limen-Neural/synaptic-mesh` URL).
 
 It is a plain library with one dependency (`serde`) — no framework, no runtime,
 no GPU requirement, and no assumptions about how your neurons integrate current.

@@ -53,7 +53,7 @@ This file contains workflow and orientation notes for AI agents working on this 
 
 ## Repository Context
 
-- **Repo**: `Limen-Neural/synaptic-wiring` (GitHub may still redirect from `Limen-Neural/synaptic-mesh` until the remote rename lands)
+- **Repo**: `Limen-Neural/synaptic-wiring` (GitHub redirects the former `Limen-Neural/synaptic-mesh` path)
 - **Main branch**: `main`
 - **Language**: Rust (edition 2024)
 - **Key concepts**: SNN wiring, topology generation, axonal delays, CSR sparse maps, Dale's law
