@@ -62,6 +62,6 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
           files: lcov.info
-          slug: Limen-Neural/synaptic-mesh
+          slug: Limen-Neural/synaptic-wiring
           fail_ci_if_error: false
           verbose: true

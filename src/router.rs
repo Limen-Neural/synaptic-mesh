@@ -27,7 +27,7 @@ const MIN_FIRE_RATE: f32 = 0.1875;
 /// This is a **router-internal integration primitive** for [`ChannelRouter`],
 /// not a general-purpose neuron model — canonical neuron models (LIF,
 /// Izhikevich, Hodgkin-Huxley, GIF, FitzHugh-Nagumo, Lapicque) live in the
-/// separate `neuromod` crate, which `synaptic-mesh` intentionally does not
+/// separate `neuromod` crate, which `synaptic-wiring` intentionally does not
 /// depend on. See the crate-level docs for the full boundary rationale.
 ///
 /// $V_{t+1} = V_t + (G \cdot I_{syn}) - \lambda(V_t - V_{rest})$

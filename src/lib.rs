@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! # synaptic-mesh
+//! # synaptic-wiring
 //!
 //! The **connectivity layer** of a spiking neural network: which neuron
 //! connects to which, how strongly, and how long the spike takes to arrive.
@@ -48,7 +48,7 @@
 //! This crate owns connectivity and timing. Neuron models (LIF, Izhikevich,
 //! Hodgkin-Huxley, …), learning rules, and training loops are deliberately
 //! out of scope — pair it with whatever integrator you already use, or with a
-//! dedicated crate such as `neuromod`, on which `synaptic-mesh` takes **no**
+//! dedicated crate such as `neuromod`, on which `synaptic-wiring` takes **no**
 //! dependency so the two can evolve independently.
 //!
 //! [`NeuromodNeuron`] is the one neuron-like type here: an integration
@@ -58,8 +58,8 @@
 //! ## Quick start
 //!
 //! ```rust
-//! use synaptic_mesh::topology::generate_small_world;
-//! use synaptic_mesh::mesh::SynapticMesh;
+//! use synaptic_wiring::topology::generate_small_world;
+//! use synaptic_wiring::mesh::SynapticMesh;
 //!
 //! // Build a 256-neuron small-world network with delays up to 5 ticks
 //! let graph = generate_small_world(256, 6, 0.2, 5, 0.2).unwrap();

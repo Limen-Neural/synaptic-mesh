@@ -1,5 +1,5 @@
 [package]
-name = "synaptic-mesh"
+name = "synaptic-wiring"
 version = "0.3.0"
 edition = "2024"
 # Keep identical to rust-toolchain.toml `channel` and the CI / coverage
@@ -8,9 +8,9 @@ rust-version = "1.98.1"
 license = "MIT OR Apache-2.0"
 description = "An SNN-based mesh for managing the wiring, topology, and temporal delays between neurons."
 authors = ["Raul Cardenas Montoya <montoyaraul34@gmail.com>"]
-repository = "https://github.com/Limen-Neural/synaptic-mesh"
-documentation = "https://docs.rs/synaptic-mesh"
-homepage = "https://docs.rs/synaptic-mesh"
+repository = "https://github.com/Limen-Neural/synaptic-wiring"
+documentation = "https://docs.rs/synaptic-wiring"
+homepage = "https://docs.rs/synaptic-wiring"
 readme = "README.md"
 keywords = ["snn", "spiking", "neuromorphic", "topology", "routing"]
 categories = ["science", "algorithms", "simulation"]

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Error types for `synaptic-mesh`.
+//! Error types for `synaptic-wiring`.
 //!
 //! Follows the `corinth-canal` pattern of a single unified error enum
 //! using `thiserror` for ergonomic `Display` and `From` implementations.
 
 use std::fmt;
 
-/// Unified error type for synaptic-mesh operations.
+/// Unified error type for synaptic-wiring operations.
 #[derive(Debug, Clone)]
 pub enum MeshError {
     /// A required parameter was out of range or invalid.

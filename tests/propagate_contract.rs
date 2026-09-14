@@ -47,9 +47,9 @@
 //!                    exc
 //! ```
 
-use synaptic_mesh::mesh::SynapticMesh;
-use synaptic_mesh::topology::SynapticGraph;
-use synaptic_mesh::types::{Polarity, SynapseDescriptor};
+use synaptic_wiring::mesh::SynapticMesh;
+use synaptic_wiring::topology::SynapticGraph;
+use synaptic_wiring::types::{Polarity, SynapseDescriptor};
 
 /// Neuron count of the fixture graph.
 const N: usize = 4;
