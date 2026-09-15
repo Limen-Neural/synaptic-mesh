@@ -14,13 +14,29 @@
 //! need to pick a few active channels out of many inputs; ignore it entirely
 //! if you only need wiring, topology, and delays.
 
+use serde::de::{Deserializer, Error as DeError};
 use serde::{Deserialize, Serialize};
+
+use crate::error::{MeshError, Result};
 
 /// Integration timesteps per routing decision (more → more stable).
 const ROUTING_TIMESTEPS: usize = 16;
 
 /// Minimum firing rate (spikes / `ROUTING_TIMESTEPS`) to activate a channel.
 const MIN_FIRE_RATE: f32 = 0.1875;
+
+/// Largest channel count [`ChannelRouter`] will allocate.
+///
+/// The router stores a dense `N × N` weight matrix plus a baseline copy, so
+/// this cap is checked in [`RouterConfig::validate`] *before* any of those
+/// vectors are allocated.
+pub const MAX_ROUTER_CHANNELS: usize = 1024;
+
+/// Largest `routing_timesteps` accepted by [`RouterConfig::validate`].
+///
+/// The routing loop is `O(timesteps × channel_count)`; this cap rejects
+/// values that would hang a restore/route on untrusted input.
+pub const MAX_ROUTING_TIMESTEPS: usize = 4096;
 
 /// Neuromodulatory Integrative Fixed-threshold (NIF) neuron.
 ///
@@ -104,39 +120,134 @@ impl NeuromodNeuron {
 }
 
 /// Configuration for a generic channel router.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Direct struct literals can hold out-of-range values; they are rejected by
+/// [`RouterConfig::validate`], [`ChannelRouter::try_with_config`], and by
+/// deserialization of both this type and [`ChannelRouter`].
+///
+/// # Valid ranges
+///
+/// | Field | Constraint |
+/// |-------|------------|
+/// | `channel_count` | `1..=`[`MAX_ROUTER_CHANNELS`] |
+/// | `routing_timesteps` | `1..=`[`MAX_ROUTING_TIMESTEPS`] |
+/// | `self_weight`, `cross_weight`, `threshold` | finite; **signed weights are allowed** |
+/// | `leak`, `min_fire_rate`, `plasticity_decay`, `plasticity_speed`, `fatigue_accumulation`, `fatigue_recovery` | finite, in `0.0..=1.0` |
+/// | `plasticity_potentiate` | finite, `>= 0` (scale factor, not a probability) |
+///
+/// `cross_weight` is typically negative (lateral inhibition). That sign is
+/// allowed and intended; it is not required. Positive self-weights are the
+/// usual self-affinity pattern, but a signed self-weight is also accepted.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RouterConfig {
-    /// Number of input/output channels.
+    /// Number of input/output channels (`1..=`[`MAX_ROUTER_CHANNELS`]).
     pub channel_count: usize,
-    /// Self-affinity weight (diagonal of weight matrix).
+    /// Self-affinity weight (diagonal of the dense channel matrix).
+    ///
+    /// Must be finite. Signed values are allowed.
     pub self_weight: f32,
-    /// Cross-channel inhibition weight (off-diagonal).
+    /// Cross-channel weight (off-diagonal).
+    ///
+    /// Must be finite. Signed values are allowed; **negative values are the
+    /// intended lateral-inhibition pattern** and are not rejected.
     pub cross_weight: f32,
     /// Firing threshold for neuromodulatory neurons.
+    ///
+    /// Must be finite. Typically positive; zero and negative values are
+    /// accepted here (modulated routing later clamps the *effective*
+    /// threshold).
     pub threshold: f32,
     /// Passive leak rate per timestep.
+    ///
+    /// Fraction of `(V − V_rest)` removed each tick. Valid range: `0.0..=1.0`.
+    /// `0.0` = no leak; `1.0` = membrane snaps to rest in one tick.
     pub leak: f32,
     /// Integration timesteps per routing decision.
+    ///
+    /// Must be in `1..=`[`MAX_ROUTING_TIMESTEPS`]. More timesteps → more
+    /// stable firing-rate estimates.
     pub routing_timesteps: usize,
     /// Minimum firing rate to activate a channel.
+    ///
+    /// Fraction of `routing_timesteps` that must spike. Valid range: `0.0..=1.0`.
     pub min_fire_rate: f32,
     /// Weight decay rate for inactive channels (use-it-or-lose-it).
-    #[serde(default = "default_plasticity_decay")]
+    ///
+    /// Mix toward baseline: `current + (baseline − current) * decay`.
+    /// Valid range: `0.0..=1.0`.
     pub plasticity_decay: f32,
     /// Weight potentiation rate for active channels (dopamine-gated).
-    #[serde(default = "default_plasticity_potentiate")]
+    ///
+    /// Non-negative finite scale factor, not a probability. The amplified
+    /// target is `baseline * (1 + potentiate * (1 + dopamine))`.
     pub plasticity_potentiate: f32,
     /// Smoothing factor for active-channel weight potentiation
-    /// (0.0 = no change, 1.0 = snap to amplified target). Tunable so callers
-    /// can trade off adaptation speed vs. numerical stability.
-    #[serde(default = "default_plasticity_speed")]
+    /// (`0.0` = no change, `1.0` = snap to amplified target). Tunable so
+    /// callers can trade off adaptation speed vs. numerical stability.
+    /// Valid range: `0.0..=1.0`.
     pub plasticity_speed: f32,
-    /// Fatigue accumulation rate per activation.
-    #[serde(default = "default_fatigue_accumulation")]
+    /// Fatigue accumulation per activation.
+    ///
+    /// Added to per-channel fatigue (itself in `0.0..=1.0`). Valid range:
+    /// `0.0..=1.0`.
     pub fatigue_accumulation: f32,
-    /// Fatigue recovery rate per tick.
-    #[serde(default = "default_fatigue_recovery")]
+    /// Fatigue recovery per idle routing decision.
+    ///
+    /// Subtracted from per-channel fatigue. Valid range: `0.0..=1.0`.
     pub fatigue_recovery: f32,
+}
+
+#[derive(Deserialize)]
+struct RawRouterConfig {
+    channel_count: usize,
+    self_weight: f32,
+    cross_weight: f32,
+    threshold: f32,
+    leak: f32,
+    routing_timesteps: usize,
+    min_fire_rate: f32,
+    #[serde(default = "default_plasticity_decay")]
+    plasticity_decay: f32,
+    #[serde(default = "default_plasticity_potentiate")]
+    plasticity_potentiate: f32,
+    #[serde(default = "default_plasticity_speed")]
+    plasticity_speed: f32,
+    #[serde(default = "default_fatigue_accumulation")]
+    fatigue_accumulation: f32,
+    #[serde(default = "default_fatigue_recovery")]
+    fatigue_recovery: f32,
+}
+
+impl RawRouterConfig {
+    fn into_config(self) -> Result<RouterConfig> {
+        let config = RouterConfig {
+            channel_count: self.channel_count,
+            self_weight: self.self_weight,
+            cross_weight: self.cross_weight,
+            threshold: self.threshold,
+            leak: self.leak,
+            routing_timesteps: self.routing_timesteps,
+            min_fire_rate: self.min_fire_rate,
+            plasticity_decay: self.plasticity_decay,
+            plasticity_potentiate: self.plasticity_potentiate,
+            plasticity_speed: self.plasticity_speed,
+            fatigue_accumulation: self.fatigue_accumulation,
+            fatigue_recovery: self.fatigue_recovery,
+        };
+        config.validate()?;
+        Ok(config)
+    }
+}
+
+impl<'de> Deserialize<'de> for RouterConfig {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        RawRouterConfig::deserialize(deserializer)?
+            .into_config()
+            .map_err(DeError::custom)
+    }
 }
 
 fn default_plasticity_decay() -> f32 {
@@ -171,6 +282,81 @@ impl Default for RouterConfig {
             fatigue_accumulation: 0.15,
             fatigue_recovery: 0.05,
         }
+    }
+}
+
+impl RouterConfig {
+    /// Check that every field is in its documented range.
+    ///
+    /// This is the single validation path used by
+    /// [`ChannelRouter::try_with_config`], [`ChannelRouter::with_config`],
+    /// and by `Deserialize` for both [`RouterConfig`] and [`ChannelRouter`].
+    /// It does not allocate.
+    pub fn validate(&self) -> Result<()> {
+        if self.channel_count == 0 || self.channel_count > MAX_ROUTER_CHANNELS {
+            return Err(MeshError::invalid_router_config(
+                "channel_count",
+                format!(
+                    "must be in 1..={MAX_ROUTER_CHANNELS}, got {}",
+                    self.channel_count
+                ),
+            ));
+        }
+        if self.routing_timesteps == 0 || self.routing_timesteps > MAX_ROUTING_TIMESTEPS {
+            return Err(MeshError::invalid_router_config(
+                "routing_timesteps",
+                format!(
+                    "must be in 1..={MAX_ROUTING_TIMESTEPS}, got {}",
+                    self.routing_timesteps
+                ),
+            ));
+        }
+        require_finite("self_weight", self.self_weight)?;
+        require_finite("cross_weight", self.cross_weight)?;
+        require_finite("threshold", self.threshold)?;
+        require_unit_interval("leak", self.leak)?;
+        require_unit_interval("min_fire_rate", self.min_fire_rate)?;
+        require_unit_interval("plasticity_decay", self.plasticity_decay)?;
+        require_non_negative("plasticity_potentiate", self.plasticity_potentiate)?;
+        require_unit_interval("plasticity_speed", self.plasticity_speed)?;
+        require_unit_interval("fatigue_accumulation", self.fatigue_accumulation)?;
+        require_unit_interval("fatigue_recovery", self.fatigue_recovery)?;
+        Ok(())
+    }
+}
+
+fn require_finite(field: &'static str, value: f32) -> Result<()> {
+    if value.is_finite() {
+        Ok(())
+    } else {
+        Err(MeshError::invalid_router_config(
+            field,
+            format!("must be finite, got {value}"),
+        ))
+    }
+}
+
+fn require_unit_interval(field: &'static str, value: f32) -> Result<()> {
+    require_finite(field, value)?;
+    if (0.0..=1.0).contains(&value) {
+        Ok(())
+    } else {
+        Err(MeshError::invalid_router_config(
+            field,
+            format!("must be finite and in 0.0..=1.0, got {value}"),
+        ))
+    }
+}
+
+fn require_non_negative(field: &'static str, value: f32) -> Result<()> {
+    require_finite(field, value)?;
+    if value >= 0.0 {
+        Ok(())
+    } else {
+        Err(MeshError::invalid_router_config(
+            field,
+            format!("must be finite and >= 0, got {value}"),
+        ))
     }
 }
 
@@ -255,19 +441,179 @@ impl RoutingDecision {
 /// - Channels weaken when idle (use-it-or-lose-it decay)
 /// - Fatigue accumulates with activation, cortisol amplifies it
 /// - The router naturally seeks the least-resistance pathway
-#[derive(Clone, Serialize, Deserialize)]
+///
+/// Deserialization re-runs [`RouterConfig::validate`] and requires neuron,
+/// weight, fatigue, and baseline-weight vector shapes to match
+/// `channel_count`. Missing `config` / `channel_fatigue` / `baseline_weights`
+/// (legacy snapshots) are filled from the neuron bank rather than rejected.
+#[derive(Clone, Debug, Serialize)]
 pub struct ChannelRouter {
     neurons: Vec<NeuromodNeuron>,
-    #[serde(default)]
     config: RouterConfig,
     /// Cumulative routing decisions since creation.
     pub total_routes: u64,
     /// Per-channel fatigue (0.0 = fresh, 1.0 = fully exhausted).
-    #[serde(default)]
     pub channel_fatigue: Vec<f32>,
     /// Baseline weights for plasticity decay reference.
-    #[serde(default)]
     baseline_weights: Vec<Vec<f32>>,
+}
+
+#[derive(Deserialize)]
+struct RawChannelRouter {
+    neurons: Vec<NeuromodNeuron>,
+    #[serde(default)]
+    config: Option<RouterConfig>,
+    #[serde(default)]
+    total_routes: u64,
+    #[serde(default)]
+    channel_fatigue: Option<Vec<f32>>,
+    #[serde(default)]
+    baseline_weights: Option<Vec<Vec<f32>>>,
+}
+
+impl RawChannelRouter {
+    fn into_router(self) -> Result<ChannelRouter> {
+        let n_neurons = self.neurons.len();
+        let config = match self.config {
+            Some(config) => config,
+            None => RouterConfig {
+                channel_count: n_neurons,
+                ..RouterConfig::default()
+            },
+        };
+        // Present configs were already validated by `RouterConfig`'s
+        // `Deserialize`. Re-run the same path so a `Raw` built in tests, or a
+        // future constructor that skips serde, cannot bypass it.
+        config.validate()?;
+
+        let n = config.channel_count;
+        validate_neuron_bank(n, &self.neurons)?;
+        let channel_fatigue = match self.channel_fatigue {
+            Some(fatigue) => fatigue,
+            None => vec![0.0; n],
+        };
+        let baseline_weights = match self.baseline_weights {
+            Some(weights) => weights,
+            None => self.neurons.iter().map(|neu| neu.weights.clone()).collect(),
+        };
+        validate_fatigue_and_baseline(n, &channel_fatigue, &baseline_weights)?;
+        Ok(ChannelRouter {
+            neurons: self.neurons,
+            config,
+            total_routes: self.total_routes,
+            channel_fatigue,
+            baseline_weights,
+        })
+    }
+}
+
+/// Neuron bank must be length `n`, each row length `n`, with finite
+/// membrane / gain / weight parameters. Called before cloning a missing
+/// baseline table so malformed snapshots cannot double peak memory.
+fn validate_neuron_bank(n: usize, neurons: &[NeuromodNeuron]) -> Result<()> {
+    if neurons.len() != n {
+        return Err(MeshError::invalid_router_config(
+            "neurons",
+            format!("length {} does not match channel_count {n}", neurons.len()),
+        ));
+    }
+    for (i, neu) in neurons.iter().enumerate() {
+        require_finite_named("v", neu.v, i)?;
+        require_finite_named("v_rest", neu.v_rest, i)?;
+        require_finite_named("v_reset", neu.v_reset, i)?;
+        require_finite_named("leak", neu.leak, i)?;
+        require_finite_named("threshold", neu.threshold, i)?;
+        require_finite_named("gain", neu.gain, i)?;
+        if neu.weights.len() != n {
+            return Err(MeshError::invalid_router_config(
+                "weights",
+                format!(
+                    "neuron {i} weights length {} does not match channel_count {n}",
+                    neu.weights.len()
+                ),
+            ));
+        }
+        if neu.weights.iter().any(|w| !w.is_finite()) {
+            return Err(MeshError::invalid_router_config(
+                "weights",
+                format!("neuron {i} weights contain a non-finite value"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn require_finite_named(field: &'static str, value: f32, neuron: usize) -> Result<()> {
+    if value.is_finite() {
+        Ok(())
+    } else {
+        Err(MeshError::invalid_router_config(
+            field,
+            format!("neuron {neuron} {field} must be finite, got {value}"),
+        ))
+    }
+}
+
+fn validate_fatigue_and_baseline(
+    n: usize,
+    channel_fatigue: &[f32],
+    baseline_weights: &[Vec<f32>],
+) -> Result<()> {
+    if channel_fatigue.len() != n {
+        return Err(MeshError::invalid_router_config(
+            "channel_fatigue",
+            format!(
+                "length {} does not match channel_count {n}",
+                channel_fatigue.len()
+            ),
+        ));
+    }
+    for (i, &fatigue) in channel_fatigue.iter().enumerate() {
+        if !fatigue.is_finite() || !(0.0..=1.0).contains(&fatigue) {
+            return Err(MeshError::invalid_router_config(
+                "channel_fatigue",
+                format!("index {i} must be finite and in 0.0..=1.0, got {fatigue}"),
+            ));
+        }
+    }
+    if baseline_weights.len() != n {
+        return Err(MeshError::invalid_router_config(
+            "baseline_weights",
+            format!(
+                "length {} does not match channel_count {n}",
+                baseline_weights.len()
+            ),
+        ));
+    }
+    for (i, row) in baseline_weights.iter().enumerate() {
+        if row.len() != n {
+            return Err(MeshError::invalid_router_config(
+                "baseline_weights",
+                format!(
+                    "row {i} length {} does not match channel_count {n}",
+                    row.len()
+                ),
+            ));
+        }
+        if row.iter().any(|w| !w.is_finite()) {
+            return Err(MeshError::invalid_router_config(
+                "baseline_weights",
+                format!("row {i} contains a non-finite value"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+impl<'de> Deserialize<'de> for ChannelRouter {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        RawChannelRouter::deserialize(deserializer)?
+            .into_router()
+            .map_err(DeError::custom)
+    }
 }
 
 impl Default for ChannelRouter {
@@ -279,19 +625,29 @@ impl Default for ChannelRouter {
 impl ChannelRouter {
     /// Create a new router with default configuration (3 channels).
     pub fn new() -> Self {
-        Self::with_config(RouterConfig::default())
+        Self::try_with_config(RouterConfig::default()).expect("default RouterConfig is valid")
     }
 
     /// Create a new router with a custom configuration.
     ///
+    /// Invalid configs panic. Prefer [`ChannelRouter::try_with_config`] when
+    /// the caller needs a recoverable error.
+    ///
     /// # Panics
     ///
-    /// Panics if `config.routing_timesteps` is zero.
+    /// Panics if [`RouterConfig::validate`] fails (zero `routing_timesteps`,
+    /// out-of-range channel count, non-finite parameters, or rates outside
+    /// their documented interval).
     pub fn with_config(config: RouterConfig) -> Self {
-        assert!(
-            config.routing_timesteps > 0,
-            "routing_timesteps must be > 0"
-        );
+        Self::try_with_config(config).unwrap_or_else(|err| panic!("{err}"))
+    }
+
+    /// Fallible counterpart of [`ChannelRouter::with_config`].
+    ///
+    /// Validates `config` before allocating the dense weight tables, so an
+    /// oversized `channel_count` cannot exhaust memory on the way to an error.
+    pub fn try_with_config(config: RouterConfig) -> Result<Self> {
+        config.validate()?;
         let n = config.channel_count;
         let neurons: Vec<NeuromodNeuron> = (0..n)
             .map(|i| {
@@ -307,13 +663,13 @@ impl ChannelRouter {
 
         let baseline_weights = neurons.iter().map(|neu| neu.weights.clone()).collect();
 
-        Self {
+        Ok(Self {
             neurons,
             config,
             total_routes: 0,
             channel_fatigue: vec![0.0; n],
             baseline_weights,
-        }
+        })
     }
 
     /// Route raw channel signals through the SNN (non-modulated).
@@ -325,10 +681,7 @@ impl ChannelRouter {
     /// matching the original pre-neuromodulation API — callers using this
     /// public method see the same error message they did before, even though
     /// the implementation now delegates to `route_modulated` internally.
-    pub fn route<S: AsRef<[f32]>>(
-        &mut self,
-        signals: S,
-    ) -> Result<RoutingDecision, crate::error::MeshError> {
+    pub fn route<S: AsRef<[f32]>>(&mut self, signals: S) -> Result<RoutingDecision> {
         self.route_modulated_with_context(signals, &NeuromodState::balanced(), "route signals")
     }
 
@@ -345,7 +698,7 @@ impl ChannelRouter {
         &mut self,
         signals: S,
         mods: &NeuromodState,
-    ) -> Result<RoutingDecision, crate::error::MeshError> {
+    ) -> Result<RoutingDecision> {
         self.route_modulated_with_context(signals, mods, "route_modulated signals")
     }
 
@@ -357,11 +710,11 @@ impl ChannelRouter {
         signals: S,
         mods: &NeuromodState,
         error_context: &str,
-    ) -> Result<RoutingDecision, crate::error::MeshError> {
+    ) -> Result<RoutingDecision> {
         let signals = signals.as_ref();
         let n = self.config.channel_count;
         if signals.len() != n {
-            return Err(crate::error::MeshError::NeuronCountMismatch {
+            return Err(MeshError::NeuronCountMismatch {
                 expected: n,
                 got: signals.len(),
                 context: error_context.into(),
@@ -369,7 +722,8 @@ impl ChannelRouter {
         }
 
         // Self-heal: keep neuromod state vectors aligned with the current
-        // channel count (e.g. after deserializing an older router).
+        // channel count if a caller mutated the public `channel_fatigue`
+        // field (serde restore already rejects inconsistent shapes).
         self.ensure_neuromod_state_synced();
         let (effective_thresholds, effective_leaks) = self.compute_effective_params(mods);
 
@@ -449,8 +803,9 @@ impl ChannelRouter {
     /// Lazily (re)initialize `channel_fatigue`, `baseline_weights`, and
     /// individual neuron weight vectors so that their lengths match the
     /// current channel count. Called at the top of `route_modulated` so
-    /// that deserializing older router states (where these fields may have
-    /// stale or mismatched lengths) cannot trigger out-of-bounds indexing.
+    /// that mutating the public `channel_fatigue` field (or any other
+    /// post-construction length drift) cannot trigger out-of-bounds
+    /// indexing. Deserialization already rejects inconsistent shapes.
     ///
     /// Repairs three layers of state:
     /// 1. `channel_fatigue` — resized to `n` (zero-filled).
@@ -677,5 +1032,400 @@ impl ChannelRouter {
     /// Access per-channel fatigue levels.
     pub fn fatigue(&self) -> &[f32] {
         &self.channel_fatigue
+    }
+}
+
+#[cfg(test)]
+mod validate_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn router_field(err: &MeshError) -> &'static str {
+        match err {
+            MeshError::InvalidRouterConfig { field, .. } => field,
+            other => panic!("expected InvalidRouterConfig, got {other:?}"),
+        }
+    }
+
+    fn serde_field_from_config_json(value: serde_json::Value) -> String {
+        let err = serde_json::from_value::<RouterConfig>(value).expect_err("config should fail");
+        err.to_string()
+    }
+
+    fn serde_field_from_router_json(value: serde_json::Value) -> String {
+        let err = serde_json::from_value::<ChannelRouter>(value).expect_err("router should fail");
+        err.to_string()
+    }
+
+    enum BadValue {
+        Count(usize),
+        Float(f32),
+    }
+
+    struct InvalidCase {
+        name: &'static str,
+        field: &'static str,
+        value: BadValue,
+    }
+
+    fn apply_bad(config: &mut RouterConfig, field: &str, value: &BadValue) {
+        match (field, value) {
+            ("channel_count", BadValue::Count(v)) => config.channel_count = *v,
+            ("routing_timesteps", BadValue::Count(v)) => config.routing_timesteps = *v,
+            ("self_weight", BadValue::Float(v)) => config.self_weight = *v,
+            ("cross_weight", BadValue::Float(v)) => config.cross_weight = *v,
+            ("threshold", BadValue::Float(v)) => config.threshold = *v,
+            ("leak", BadValue::Float(v)) => config.leak = *v,
+            ("min_fire_rate", BadValue::Float(v)) => config.min_fire_rate = *v,
+            ("plasticity_decay", BadValue::Float(v)) => config.plasticity_decay = *v,
+            ("plasticity_potentiate", BadValue::Float(v)) => config.plasticity_potentiate = *v,
+            ("plasticity_speed", BadValue::Float(v)) => config.plasticity_speed = *v,
+            ("fatigue_accumulation", BadValue::Float(v)) => config.fatigue_accumulation = *v,
+            ("fatigue_recovery", BadValue::Float(v)) => config.fatigue_recovery = *v,
+            _ => panic!("unhandled invalid-case field {field}"),
+        }
+    }
+
+    fn json_representable(value: &BadValue) -> bool {
+        match *value {
+            BadValue::Count(_) => true,
+            BadValue::Float(v) => v.is_finite(),
+        }
+    }
+
+    fn invalid_cases() -> Vec<InvalidCase> {
+        let counts = [
+            ("channel_count_zero", "channel_count", 0usize),
+            (
+                "channel_count_over_max",
+                "channel_count",
+                MAX_ROUTER_CHANNELS + 1,
+            ),
+            ("channel_count_usize_max", "channel_count", usize::MAX),
+            ("routing_timesteps_zero", "routing_timesteps", 0),
+            (
+                "routing_timesteps_over_max",
+                "routing_timesteps",
+                MAX_ROUTING_TIMESTEPS + 1,
+            ),
+        ];
+        let floats = [
+            ("self_weight_nan", "self_weight", f32::NAN),
+            ("self_weight_inf", "self_weight", f32::INFINITY),
+            ("cross_weight_neg_inf", "cross_weight", f32::NEG_INFINITY),
+            ("threshold_nan", "threshold", f32::NAN),
+            ("leak_below", "leak", -0.01),
+            ("leak_above", "leak", 1.01),
+            ("leak_nan", "leak", f32::NAN),
+            ("leak_inf", "leak", f32::INFINITY),
+            ("min_fire_rate_below", "min_fire_rate", -0.01),
+            ("min_fire_rate_above", "min_fire_rate", 1.01),
+            ("min_fire_rate_nan", "min_fire_rate", f32::NAN),
+            ("plasticity_decay_below", "plasticity_decay", -0.01),
+            ("plasticity_decay_above", "plasticity_decay", 1.01),
+            ("plasticity_decay_nan", "plasticity_decay", f32::NAN),
+            (
+                "plasticity_potentiate_negative",
+                "plasticity_potentiate",
+                -0.01,
+            ),
+            (
+                "plasticity_potentiate_nan",
+                "plasticity_potentiate",
+                f32::NAN,
+            ),
+            (
+                "plasticity_potentiate_inf",
+                "plasticity_potentiate",
+                f32::INFINITY,
+            ),
+            ("plasticity_speed_below", "plasticity_speed", -0.01),
+            ("plasticity_speed_above", "plasticity_speed", 1.01),
+            ("plasticity_speed_nan", "plasticity_speed", f32::NAN),
+            ("fatigue_accumulation_below", "fatigue_accumulation", -0.01),
+            ("fatigue_accumulation_above", "fatigue_accumulation", 1.01),
+            ("fatigue_accumulation_nan", "fatigue_accumulation", f32::NAN),
+            ("fatigue_recovery_below", "fatigue_recovery", -0.01),
+            ("fatigue_recovery_above", "fatigue_recovery", 1.01),
+            ("fatigue_recovery_inf", "fatigue_recovery", f32::INFINITY),
+        ];
+        counts
+            .into_iter()
+            .map(|(name, field, value)| InvalidCase {
+                name,
+                field,
+                value: BadValue::Count(value),
+            })
+            .chain(floats.into_iter().map(|(name, field, value)| InvalidCase {
+                name,
+                field,
+                value: BadValue::Float(value),
+            }))
+            .collect()
+    }
+    #[test]
+    fn default_config_is_valid() {
+        RouterConfig::default().validate().unwrap();
+    }
+
+    #[test]
+    fn table_rejects_every_invalid_config_field() {
+        for case in invalid_cases() {
+            let mut config = RouterConfig::default();
+            apply_bad(&mut config, case.field, &case.value);
+            let err = match config.validate() {
+                Err(err) => err,
+                Ok(()) => panic!("{}: validate should fail", case.name),
+            };
+            assert_eq!(
+                router_field(&err),
+                case.field,
+                "{}: unexpected field in {err}",
+                case.name
+            );
+
+            let ctor_err = ChannelRouter::try_with_config(config.clone()).expect_err(case.name);
+            assert_eq!(
+                router_field(&ctor_err),
+                case.field,
+                "{}: constructor field mismatch",
+                case.name
+            );
+            assert_eq!(
+                ctor_err, err,
+                "{}: validate and try_with_config must return the same error",
+                case.name
+            );
+
+            if !json_representable(&case.value) {
+                continue;
+            }
+            let mut mutated = RouterConfig::default();
+            apply_bad(&mut mutated, case.field, &case.value);
+            let config_msg = serde_field_from_config_json(serde_json::to_value(&mutated).unwrap());
+            assert!(
+                config_msg.contains(case.field),
+                "{}: RouterConfig serde missing field name: {config_msg}",
+                case.name
+            );
+            assert!(
+                config_msg.contains(&err.to_string()),
+                "{}: RouterConfig serde should carry the same MeshError Display, got {config_msg}, expected {}",
+                case.name,
+                err
+            );
+
+            let mut router_json = serde_json::to_value(ChannelRouter::default()).unwrap();
+            router_json["config"] = serde_json::to_value(&mutated).unwrap();
+            let router_msg = serde_field_from_router_json(router_json);
+            assert!(
+                router_msg.contains(case.field),
+                "{}: ChannelRouter serde missing field name: {router_msg}",
+                case.name
+            );
+            assert!(
+                router_msg.contains(&err.to_string()),
+                "{}: ChannelRouter serde should carry the same MeshError Display, got {router_msg}, expected {}",
+                case.name,
+                err
+            );
+        }
+    }
+
+    type BoundaryMutator = fn(&mut RouterConfig);
+
+    fn valid_boundary_mutators() -> Vec<(&'static str, BoundaryMutator)> {
+        vec![
+            ("min_channels", |c| c.channel_count = 1),
+            ("max_channels_validate_only", |c| {
+                c.channel_count = MAX_ROUTER_CHANNELS
+            }),
+            ("leak_0", |c| c.leak = 0.0),
+            ("leak_1", |c| c.leak = 1.0),
+            ("min_fire_0", |c| c.min_fire_rate = 0.0),
+            ("min_fire_1", |c| c.min_fire_rate = 1.0),
+            ("decay_0", |c| c.plasticity_decay = 0.0),
+            ("decay_1", |c| c.plasticity_decay = 1.0),
+            ("potentiate_0", |c| c.plasticity_potentiate = 0.0),
+            ("speed_0", |c| c.plasticity_speed = 0.0),
+            ("speed_1", |c| c.plasticity_speed = 1.0),
+            ("fatigue_acc_0", |c| c.fatigue_accumulation = 0.0),
+            ("fatigue_acc_1", |c| c.fatigue_accumulation = 1.0),
+            ("fatigue_rec_0", |c| c.fatigue_recovery = 0.0),
+            ("fatigue_rec_1", |c| c.fatigue_recovery = 1.0),
+            ("signed_cross_inhibition", |c| c.cross_weight = -1.0),
+            ("positive_cross_weight", |c| c.cross_weight = 0.25),
+            ("signed_self_weight", |c| c.self_weight = -0.3),
+            ("zero_threshold", |c| c.threshold = 0.0),
+            ("one_timestep", |c| c.routing_timesteps = 1),
+            ("max_timesteps", |c| {
+                c.routing_timesteps = MAX_ROUTING_TIMESTEPS
+            }),
+        ]
+    }
+
+    #[test]
+    fn valid_boundaries_round_trip() {
+        for (name, mutate) in valid_boundary_mutators() {
+            let mut config = RouterConfig::default();
+            mutate(&mut config);
+            config
+                .validate()
+                .unwrap_or_else(|err| panic!("{name}: valid boundary rejected: {err}"));
+            let json = serde_json::to_value(&config).unwrap();
+            let restored: RouterConfig = serde_json::from_value(json)
+                .unwrap_or_else(|err| panic!("{name}: valid config failed to deserialize: {err}"));
+            assert_eq!(restored, config, "{name}: config round-trip");
+
+            if config.channel_count == MAX_ROUTER_CHANNELS {
+                continue;
+            }
+            let router = ChannelRouter::try_with_config(config.clone())
+                .unwrap_or_else(|err| panic!("{name}: try_with_config: {err}"));
+            let router_json = serde_json::to_value(&router).unwrap();
+            let restored_router: ChannelRouter = serde_json::from_value(router_json)
+                .unwrap_or_else(|err| panic!("{name}: router deserialize: {err}"));
+            assert_eq!(restored_router.config(), router.config(), "{name}");
+            assert_eq!(
+                restored_router.weight_matrix(),
+                router.weight_matrix(),
+                "{name}"
+            );
+            assert_eq!(restored_router.fatigue(), router.fatigue(), "{name}");
+            assert_eq!(restored_router.total_routes, router.total_routes, "{name}");
+        }
+    }
+
+    #[test]
+    fn custom_and_default_routers_round_trip() {
+        let default_router = ChannelRouter::default();
+        let json = serde_json::to_value(&default_router).unwrap();
+        let restored: ChannelRouter = serde_json::from_value(json).unwrap();
+        assert_eq!(restored.config(), default_router.config());
+        assert_eq!(restored.weight_matrix(), default_router.weight_matrix());
+
+        let custom = RouterConfig {
+            channel_count: 4,
+            self_weight: 1.1,
+            cross_weight: -0.2,
+            threshold: 0.3,
+            leak: 0.05,
+            routing_timesteps: 8,
+            min_fire_rate: 0.25,
+            plasticity_decay: 0.03,
+            plasticity_potentiate: 0.2,
+            plasticity_speed: 0.4,
+            fatigue_accumulation: 0.2,
+            fatigue_recovery: 0.1,
+        };
+        let router = ChannelRouter::try_with_config(custom.clone()).unwrap();
+        let json = serde_json::to_value(&router).unwrap();
+        let restored: ChannelRouter = serde_json::from_value(json).unwrap();
+        assert_eq!(restored.config(), &custom);
+        assert_eq!(restored.weight_matrix(), router.weight_matrix());
+    }
+
+    #[test]
+    fn try_with_config_rejects_oversized_channel_count_without_allocating() {
+        // If validation ran after `vec![0.0; n]`, usize::MAX would OOM/hang
+        // this test rather than returning.
+        let config = RouterConfig {
+            channel_count: usize::MAX,
+            ..RouterConfig::default()
+        };
+        let err = ChannelRouter::try_with_config(config).unwrap_err();
+        assert_eq!(router_field(&err), "channel_count");
+    }
+
+    #[test]
+    fn max_channel_count_is_accepted_by_validate_and_constructor() {
+        let config = RouterConfig {
+            channel_count: MAX_ROUTER_CHANNELS,
+            ..RouterConfig::default()
+        };
+        config.validate().unwrap();
+        let router = ChannelRouter::try_with_config(config).unwrap();
+        assert_eq!(router.config().channel_count, MAX_ROUTER_CHANNELS);
+        assert_eq!(router.weight_matrix().len(), MAX_ROUTER_CHANNELS);
+        assert_eq!(router.weight_matrix()[0].len(), MAX_ROUTER_CHANNELS);
+        assert_eq!(router.fatigue().len(), MAX_ROUTER_CHANNELS);
+    }
+
+    #[test]
+    fn malformed_shapes_are_rejected_with_matching_fields() {
+        let router = ChannelRouter::default();
+        let base = serde_json::to_value(&router).unwrap();
+
+        let mut empty_inner = base.clone();
+        empty_inner["baseline_weights"] = json!([[], [], []]);
+        let msg = serde_field_from_router_json(empty_inner);
+        assert!(msg.contains("baseline_weights"), "empty inner rows: {msg}");
+
+        let mut short_fatigue = base.clone();
+        short_fatigue["channel_fatigue"] = json!([0.0, 0.0]);
+        let msg = serde_field_from_router_json(short_fatigue);
+        assert!(msg.contains("channel_fatigue"), "short fatigue: {msg}");
+
+        let mut extra_neurons = base.clone();
+        extra_neurons["neurons"] = json!([]);
+        let msg = serde_field_from_router_json(extra_neurons);
+        assert!(msg.contains("neurons"), "empty neurons: {msg}");
+
+        let mut missing_weights = base.clone();
+        missing_weights["neurons"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("weights");
+        let msg = serde_field_from_router_json(missing_weights);
+        assert!(msg.contains("weights"), "missing neuron weights: {msg}");
+
+        let mut ragged_baseline = base.clone();
+        ragged_baseline["baseline_weights"] = json!([[0.9, -0.15, -0.15], [0.0], [0.0, 0.0, 0.0]]);
+        let msg = serde_field_from_router_json(ragged_baseline);
+        assert!(msg.contains("baseline_weights"), "ragged baseline: {msg}");
+
+        let mut out_of_range_fatigue = base;
+        out_of_range_fatigue["channel_fatigue"] = json!([0.0, 1.5, 0.0]);
+        let msg = serde_field_from_router_json(out_of_range_fatigue);
+        assert!(
+            msg.contains("channel_fatigue"),
+            "fatigue out of range: {msg}"
+        );
+    }
+
+    #[test]
+    fn legacy_snapshot_without_optional_fields_deserializes() {
+        let router = ChannelRouter::default();
+        let mut json = serde_json::to_value(&router).unwrap();
+        let obj = json.as_object_mut().unwrap();
+        obj.remove("config");
+        obj.remove("channel_fatigue");
+        obj.remove("baseline_weights");
+
+        let restored: ChannelRouter =
+            serde_json::from_value(json).expect("legacy snapshot must deserialize");
+        assert_eq!(restored.config().channel_count, 3);
+        assert_eq!(restored.weight_matrix().len(), 3);
+        assert_eq!(restored.fatigue(), &[0.0, 0.0, 0.0]);
+        let mut restored = restored;
+        restored
+            .route_modulated([0.5, 0.0, 0.0], &NeuromodState::balanced())
+            .unwrap();
+    }
+
+    #[test]
+    fn signed_zero_rates_are_accepted() {
+        let config = RouterConfig {
+            leak: -0.0,
+            min_fire_rate: -0.0,
+            plasticity_decay: -0.0,
+            plasticity_potentiate: -0.0,
+            plasticity_speed: -0.0,
+            fatigue_accumulation: -0.0,
+            fatigue_recovery: -0.0,
+            ..RouterConfig::default()
+        };
+        config.validate().unwrap();
+        ChannelRouter::try_with_config(config).unwrap();
     }
 }
