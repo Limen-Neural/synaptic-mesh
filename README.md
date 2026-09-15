@@ -87,6 +87,11 @@ Published images are a **docs snapshot** for release packaging (not a
 substitute for depending on the crate from Cargo). This crate has no
 example binaries.
 
+Anonymous `docker pull` works only after the GHCR package is **public**.
+The publish workflow has `packages: write` so it can push images; GitHub
+still creates a new package as private until an org owner sets visibility
+to public under [GitHub Packages](https://github.com/orgs/Limen-Neural/packages).
+
 ```bash
 docker pull ghcr.io/limen-neural/synaptic-mesh:0.3.0
 docker run --rm ghcr.io/limen-neural/synaptic-mesh:0.3.0

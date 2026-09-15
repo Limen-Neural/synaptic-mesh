@@ -74,6 +74,7 @@ jobs:
           echo "Cargo.toml rust-version=$cargo_rv"
           echo "rust-toolchain.toml channel=$toolchain_ch"
           echo "README.md MSRV=$readme_rv"
+          echo "Dockerfile FROM rust=$dockerfile_pin"
           agree=0
           [ "$cargo_rv" = "$toolchain_ch" ] || agree=1
           [ "$cargo_rv" = "$readme_rv" ] || agree=1

@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Library crate (no `examples/` / `[[bin]]`), so the image is a rustdoc snapshot
   plus a version stamp rather than a fake binary. PR workflow verifies without
   pushing; `main` publishes SHA tags; `v*` tags also publish version + `latest`
+  when the tag matches `Cargo.toml` (including prerelease) and the tagged
+  commit is already on `main`. Anonymous GHCR pulls need the package set
+  public in GitHub Packages (`packages: write` only pushes).
   (issue #78 / LIM-1178).
 - **CI**: Codecov coverage workflow (`.github/workflows/coverage.yml`)
   uploads LCOV from `cargo llvm-cov nextest` on PRs and `main`.
