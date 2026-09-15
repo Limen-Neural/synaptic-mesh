@@ -50,6 +50,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Router**: invalid `RouterConfig` values and malformed `ChannelRouter`
   checkpoints are rejected at construction and deserialize time instead of
   panicking later or restoring inconsistent vector shapes (issue LIM-1228).
+- **Docker**: rustdoc path checks use `synaptic_wiring` after the crate rename
+  (issue LIM-1228 / leftover from LIM-1178).
 
 ## [0.3.0] - 2026-09-13
 
