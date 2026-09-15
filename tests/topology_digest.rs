@@ -21,7 +21,7 @@ const GOLDEN_EMPTY_0: &str = "synaptic-wiring.topology.digest.v1:sha256:14f89328
 const GOLDEN_EMPTY_3: &str = "synaptic-wiring.topology.digest.v1:sha256:a2c1014ab2a24a342e01878c5dbe69972e8ab4152cb36d2faf88ec210d0b6203";
 
 /// Golden v1 digest for the three-edge fixture (any insertion order).
-const GOLDEN_SMALL: &str = "synaptic-wiring.topology.digest.v1:sha256:3a052f69623ebc415178d351a7f6f666ef5b1775af3d2faa7be3b36949d9d191";
+const GOLDEN_SMALL: &str = "synaptic-wiring.topology.digest.v1:sha256:be1786c690cda6d02d9c6fa06d1844642398ecebab3d19ccec981062711cd36f";
 
 fn desc(
     source: u32,

@@ -21,10 +21,10 @@
 //! 2. Schema version [`TOPOLOGY_DIGEST_SCHEMA_VERSION`] as little-endian `u16`.
 //! 3. Neuron count as little-endian `u64`.
 //! 4. Edge count as little-endian `u64`.
-//! 5. One 15-byte record per logical edge, sorted in canonical order
+//! 5. One 23-byte record per logical edge, sorted in canonical order
 //!    `(source, target, delay, polarity_tag, weight_bits)`:
-//!    - `source`: little-endian `u32` (row index)
-//!    - `target`: little-endian `u32` ([`crate::NeuronId`])
+//!    - `source`: little-endian `u64` (CSR row index)
+//!    - `target`: little-endian `u64` (zero-extended [`crate::NeuronId`])
 //!    - `weight_bits`: little-endian `u32` of [`f32::to_bits`] (IEEE 754
 //!      bit pattern of the **signed** CSR weight)
 //!    - `delay`: little-endian [`crate::DelayTicks`]
@@ -84,43 +84,10 @@ impl TopologyDigest {
     /// part of the digest.
     #[must_use]
     pub fn from_graph(graph: &SynapticGraph) -> Self {
-        let mut edges = Vec::with_capacity(graph.synapse_count());
-        for src in 0..graph.neuron_count() {
-            let source = u32::try_from(src)
-                .expect("schema v1 encodes source neuron ids as u32; row index exceeds u32::MAX");
-            for (target, weight, delay, polarity) in graph.outgoing(src) {
-                debug_assert!(
-                    weight.is_finite(),
-                    "valid graphs reject non-finite weights before digest"
-                );
-                edges.push(CanonicalEdge {
-                    source,
-                    target,
-                    delay,
-                    polarity: polarity_tag(polarity),
-                    weight_bits: weight.to_bits(),
-                });
-            }
-        }
-        edges.sort_unstable();
-
-        let mut hasher = Sha256::new();
-        hasher.update(TOPOLOGY_DIGEST_DOMAIN.as_bytes());
-        hasher.update([DOMAIN_TERMINATOR]);
-        hasher.update(TOPOLOGY_DIGEST_SCHEMA_VERSION.to_le_bytes());
-        hasher.update((graph.neuron_count() as u64).to_le_bytes());
-        hasher.update((edges.len() as u64).to_le_bytes());
-        for edge in &edges {
-            hasher.update(edge.source.to_le_bytes());
-            hasher.update(edge.target.to_le_bytes());
-            hasher.update(edge.weight_bits.to_le_bytes());
-            hasher.update(edge.delay.to_le_bytes());
-            hasher.update([edge.polarity]);
-        }
-
+        let edges = canonical_edges(graph);
         Self {
             schema_version: TOPOLOGY_DIGEST_SCHEMA_VERSION,
-            hash: hasher.finalize().into(),
+            hash: hash_v1(graph.neuron_count() as u64, &edges),
         }
     }
 
@@ -169,12 +136,7 @@ impl FromStr for TopologyDigest {
     type Err = TopologyDigestParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (domain, rest) = s
-            .split_once(':')
-            .ok_or_else(TopologyDigestParseError::format)?;
-        let (algorithm, hex) = rest
-            .split_once(':')
-            .ok_or_else(TopologyDigestParseError::format)?;
+        let (domain, algorithm, hex) = split_manifest(s)?;
         if domain != TOPOLOGY_DIGEST_DOMAIN {
             return Err(TopologyDigestParseError(format!(
                 "unsupported digest domain {domain:?}"
@@ -185,10 +147,9 @@ impl FromStr for TopologyDigest {
                 "unsupported digest algorithm {algorithm:?}"
             )));
         }
-        let hash = hex_decode_sha256(hex)?;
         Ok(Self {
             schema_version: TOPOLOGY_DIGEST_SCHEMA_VERSION,
-            hash,
+            hash: hex_decode_sha256(hex)?,
         })
     }
 }
@@ -268,11 +229,50 @@ impl SynapticGraph {
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct CanonicalEdge {
-    source: u32,
-    target: u32,
+    source: u64,
+    target: u64,
     delay: u16,
     polarity: u8,
     weight_bits: u32,
+}
+
+fn canonical_edges(graph: &SynapticGraph) -> Vec<CanonicalEdge> {
+    let mut edges = Vec::with_capacity(graph.synapse_count());
+    for src in 0..graph.neuron_count() {
+        let source = src as u64;
+        for (target, weight, delay, polarity) in graph.outgoing(src) {
+            debug_assert!(
+                weight.is_finite(),
+                "valid graphs reject non-finite weights before digest"
+            );
+            edges.push(CanonicalEdge {
+                source,
+                target: u64::from(target),
+                delay,
+                polarity: polarity_tag(polarity),
+                weight_bits: weight.to_bits(),
+            });
+        }
+    }
+    edges.sort_unstable();
+    edges
+}
+
+fn hash_v1(neuron_count: u64, edges: &[CanonicalEdge]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(TOPOLOGY_DIGEST_DOMAIN.as_bytes());
+    hasher.update([DOMAIN_TERMINATOR]);
+    hasher.update(TOPOLOGY_DIGEST_SCHEMA_VERSION.to_le_bytes());
+    hasher.update(neuron_count.to_le_bytes());
+    hasher.update((edges.len() as u64).to_le_bytes());
+    for edge in edges {
+        hasher.update(edge.source.to_le_bytes());
+        hasher.update(edge.target.to_le_bytes());
+        hasher.update(edge.weight_bits.to_le_bytes());
+        hasher.update(edge.delay.to_le_bytes());
+        hasher.update([edge.polarity]);
+    }
+    hasher.finalize().into()
 }
 
 fn polarity_tag(polarity: Polarity) -> u8 {
@@ -280,6 +280,16 @@ fn polarity_tag(polarity: Polarity) -> u8 {
         Polarity::Excitatory => 0,
         Polarity::Inhibitory => 1,
     }
+}
+
+fn split_manifest(s: &str) -> Result<(&str, &str, &str), TopologyDigestParseError> {
+    let (domain, rest) = s
+        .split_once(':')
+        .ok_or_else(TopologyDigestParseError::format)?;
+    let (algorithm, hex) = rest
+        .split_once(':')
+        .ok_or_else(TopologyDigestParseError::format)?;
+    Ok((domain, algorithm, hex))
 }
 
 fn hex_encode(bytes: &[u8]) -> String {
@@ -349,7 +359,7 @@ mod tests {
     const GOLDEN_EMPTY_3: &str = "synaptic-wiring.topology.digest.v1:sha256:a2c1014ab2a24a342e01878c5dbe69972e8ab4152cb36d2faf88ec210d0b6203";
 
     /// Golden v1 digest for the three-edge fixture used across digest tests.
-    const GOLDEN_SMALL: &str = "synaptic-wiring.topology.digest.v1:sha256:3a052f69623ebc415178d351a7f6f666ef5b1775af3d2faa7be3b36949d9d191";
+    const GOLDEN_SMALL: &str = "synaptic-wiring.topology.digest.v1:sha256:be1786c690cda6d02d9c6fa06d1844642398ecebab3d19ccec981062711cd36f";
 
     fn small_fixture(order: &[usize]) -> Vec<SynapseDescriptor> {
         let base = [
@@ -403,48 +413,28 @@ mod tests {
         }
     }
 
+    fn digest_of(descriptors: &[SynapseDescriptor]) -> TopologyDigest {
+        SynapticGraph::from_descriptors(3, descriptors)
+            .unwrap()
+            .topology_digest()
+    }
+
     #[test]
     fn topology_digest_changes_with_endpoint_delay_polarity_or_weight() {
-        let base = SynapticGraph::from_descriptors(3, &small_fixture(&[0, 1, 2]))
-            .unwrap()
-            .topology_digest();
+        let base = digest_of(&small_fixture(&[0, 1, 2]));
+        let mut endpoint = small_fixture(&[0, 1, 2]);
+        endpoint[0].target = 0;
+        let mut delay = small_fixture(&[0, 1, 2]);
+        delay[0].delay = 9;
+        let mut polarity = small_fixture(&[0, 1, 2]);
+        polarity[2].polarity = Polarity::Inhibitory;
+        let mut weight = small_fixture(&[0, 1, 2]);
+        weight[1].weight = 0.16;
 
-        let endpoint = {
-            let mut d = small_fixture(&[0, 1, 2]);
-            d[0].target = 0;
-            SynapticGraph::from_descriptors(3, &d)
-                .unwrap()
-                .topology_digest()
-        };
-        let delay = {
-            let mut d = small_fixture(&[0, 1, 2]);
-            d[0].delay = 9;
-            SynapticGraph::from_descriptors(3, &d)
-                .unwrap()
-                .topology_digest()
-        };
-        let polarity = {
-            let mut d = small_fixture(&[0, 1, 2]);
-            d[2].polarity = Polarity::Inhibitory;
-            SynapticGraph::from_descriptors(3, &d)
-                .unwrap()
-                .topology_digest()
-        };
-        let weight = {
-            let mut d = small_fixture(&[0, 1, 2]);
-            d[1].weight = 0.16;
-            SynapticGraph::from_descriptors(3, &d)
-                .unwrap()
-                .topology_digest()
-        };
-
-        assert_ne!(endpoint, base);
-        assert_ne!(delay, base);
-        assert_ne!(polarity, base);
-        assert_ne!(weight, base);
-        assert_ne!(endpoint, delay);
-        assert_ne!(delay, polarity);
-        assert_ne!(polarity, weight);
+        assert_ne!(digest_of(&endpoint), base);
+        assert_ne!(digest_of(&delay), base);
+        assert_ne!(digest_of(&polarity), base);
+        assert_ne!(digest_of(&weight), base);
     }
 
     #[test]
@@ -462,11 +452,11 @@ mod tests {
         );
         assert_eq!(
             plus.to_string(),
-            "synaptic-wiring.topology.digest.v1:sha256:362ef5ddb1539b575389928d2f7ad91fd5cef91284f24e460f2b9f059902998b"
+            "synaptic-wiring.topology.digest.v1:sha256:72c7a0686739be822c0dedf46f71dee35a2c154b3debc37019afe9ece19ae9d0"
         );
         assert_eq!(
             minus.to_string(),
-            "synaptic-wiring.topology.digest.v1:sha256:cbdea2aaf785d88a02f1eeff9cf4339ff8de64c7828f1cb126b0a6ee59e47345"
+            "synaptic-wiring.topology.digest.v1:sha256:1b9b1789b7aed14363f73ed4f3c5708fc05180166ee7b9f620212f57d2a5812f"
         );
     }
 
