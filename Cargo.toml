@@ -31,6 +31,8 @@ exclude = [
     "/AGENTS.md",
     "/deny.toml",
     "/rust-toolchain.toml",
+    "/Dockerfile",
+    "/.dockerignore",
 ]
 
 [dependencies]
