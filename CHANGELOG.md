@@ -7,17 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- **Crate rename**: the Cargo package is now `synaptic-wiring` (was
-  `synaptic-mesh`) so the first crates.io publish does not collide with
-  [ruvnet/Synaptic-Mesh](https://github.com/ruvnet/Synaptic-Mesh). GitHub
-  URLs point at [`Limen-Neural/synaptic-wiring`](https://github.com/Limen-Neural/synaptic-wiring)
-  (the GitHub repository rename has landed; the old `synaptic-mesh` path
-  redirects). The `SynapticMesh` type is unchanged.
-
 ### Added
 
+- **Mesh**: `SynapticMesh::propagate_into` and `propagate_graded_into` write
+  this tick's currents into a caller-owned `&mut [f32]`. The allocating
+  `propagate` / `propagate_graded` methods remain as source-compatible
+  wrappers. Wrong-sized or non-finite input is rejected before tick, delay
+  buffer, or output mutation. After `new()`, a successful reuse-path tick
+  performs no heap allocations (issue LIM-1222).
+- **Delay buffer**: `SpikeDelayBuffer::drain_current_tick_into` drains into
+  a caller-owned buffer; the allocating drain is a wrapper around it.
+- **Benches**: Criterion cases for 16 / 256 / 4096 neurons with short and
+  long delays, comparing allocating vs caller-buffer propagation.
 - **Packaging**: Docker + GHCR container for releases (`ghcr.io/limen-neural/synaptic-mesh`).
   Library crate (no `examples/` / `[[bin]]`), so the image is a rustdoc snapshot
   plus a version stamp rather than a fake binary. PR workflow verifies without
@@ -31,6 +32,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The MSRV pin-agreement check now also requires `coverage.yml`
   to stay on the same Rust version as `ci.yml`. JUnit results are
   uploaded from `target/nextest/ci/junit.xml` (issue #77 / LIM-1180).
+
+### Changed
+
+- **Crate rename**: the Cargo package is now `synaptic-wiring` (was
+  `synaptic-mesh`) so the first crates.io publish does not collide with
+  [ruvnet/Synaptic-Mesh](https://github.com/ruvnet/Synaptic-Mesh). GitHub
+  URLs point at [`Limen-Neural/synaptic-wiring`](https://github.com/Limen-Neural/synaptic-wiring)
+  (the GitHub repository rename has landed; the old `synaptic-mesh` path
+  redirects). The `SynapticMesh` type is unchanged.
 
 ## [0.3.0] - 2026-09-13
 
