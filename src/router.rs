@@ -32,6 +32,12 @@ const MIN_FIRE_RATE: f32 = 0.1875;
 /// vectors are allocated.
 pub const MAX_ROUTER_CHANNELS: usize = 1024;
 
+/// Largest `routing_timesteps` accepted by [`RouterConfig::validate`].
+///
+/// The routing loop is `O(timesteps × channel_count)`; this cap rejects
+/// values that would hang a restore/route on untrusted input.
+pub const MAX_ROUTING_TIMESTEPS: usize = 4096;
+
 /// Neuromodulatory Integrative Fixed-threshold (NIF) neuron.
 ///
 /// This is a **router-internal integration primitive** for [`ChannelRouter`],
@@ -124,7 +130,7 @@ impl NeuromodNeuron {
 /// | Field | Constraint |
 /// |-------|------------|
 /// | `channel_count` | `1..=`[`MAX_ROUTER_CHANNELS`] |
-/// | `routing_timesteps` | `> 0` |
+/// | `routing_timesteps` | `1..=`[`MAX_ROUTING_TIMESTEPS`] |
 /// | `self_weight`, `cross_weight`, `threshold` | finite; **signed weights are allowed** |
 /// | `leak`, `min_fire_rate`, `plasticity_decay`, `plasticity_speed`, `fatigue_accumulation`, `fatigue_recovery` | finite, in `0.0..=1.0` |
 /// | `plasticity_potentiate` | finite, `>= 0` (scale factor, not a probability) |
@@ -158,7 +164,8 @@ pub struct RouterConfig {
     pub leak: f32,
     /// Integration timesteps per routing decision.
     ///
-    /// Must be `> 0`. More timesteps → more stable firing-rate estimates.
+    /// Must be in `1..=`[`MAX_ROUTING_TIMESTEPS`]. More timesteps → more
+    /// stable firing-rate estimates.
     pub routing_timesteps: usize,
     /// Minimum firing rate to activate a channel.
     ///
@@ -295,10 +302,13 @@ impl RouterConfig {
                 ),
             ));
         }
-        if self.routing_timesteps == 0 {
+        if self.routing_timesteps == 0 || self.routing_timesteps > MAX_ROUTING_TIMESTEPS {
             return Err(MeshError::invalid_router_config(
                 "routing_timesteps",
-                "must be > 0",
+                format!(
+                    "must be in 1..={MAX_ROUTING_TIMESTEPS}, got {}",
+                    self.routing_timesteps
+                ),
             ));
         }
         require_finite("self_weight", self.self_weight)?;
@@ -477,6 +487,7 @@ impl RawChannelRouter {
         config.validate()?;
 
         let n = config.channel_count;
+        validate_neuron_bank(n, &self.neurons)?;
         let channel_fatigue = match self.channel_fatigue {
             Some(fatigue) => fatigue,
             None => vec![0.0; n],
@@ -485,7 +496,7 @@ impl RawChannelRouter {
             Some(weights) => weights,
             None => self.neurons.iter().map(|neu| neu.weights.clone()).collect(),
         };
-        validate_router_vectors(n, &self.neurons, &channel_fatigue, &baseline_weights)?;
+        validate_fatigue_and_baseline(n, &channel_fatigue, &baseline_weights)?;
         Ok(ChannelRouter {
             neurons: self.neurons,
             config,
@@ -496,15 +507,10 @@ impl RawChannelRouter {
     }
 }
 
-/// Require neuron / fatigue / baseline tables to be an `n × n` (or length-`n`)
-/// layout with finite entries. Called after config validation so a huge
-/// `channel_count` is rejected before this walks caller-provided vectors.
-fn validate_router_vectors(
-    n: usize,
-    neurons: &[NeuromodNeuron],
-    channel_fatigue: &[f32],
-    baseline_weights: &[Vec<f32>],
-) -> Result<()> {
+/// Neuron bank must be length `n`, each row length `n`, with finite
+/// membrane / gain / weight parameters. Called before cloning a missing
+/// baseline table so malformed snapshots cannot double peak memory.
+fn validate_neuron_bank(n: usize, neurons: &[NeuromodNeuron]) -> Result<()> {
     if neurons.len() != n {
         return Err(MeshError::invalid_router_config(
             "neurons",
@@ -512,6 +518,12 @@ fn validate_router_vectors(
         ));
     }
     for (i, neu) in neurons.iter().enumerate() {
+        require_finite_named("v", neu.v, i)?;
+        require_finite_named("v_rest", neu.v_rest, i)?;
+        require_finite_named("v_reset", neu.v_reset, i)?;
+        require_finite_named("leak", neu.leak, i)?;
+        require_finite_named("threshold", neu.threshold, i)?;
+        require_finite_named("gain", neu.gain, i)?;
         if neu.weights.len() != n {
             return Err(MeshError::invalid_router_config(
                 "weights",
@@ -528,6 +540,25 @@ fn validate_router_vectors(
             ));
         }
     }
+    Ok(())
+}
+
+fn require_finite_named(field: &'static str, value: f32, neuron: usize) -> Result<()> {
+    if value.is_finite() {
+        Ok(())
+    } else {
+        Err(MeshError::invalid_router_config(
+            field,
+            format!("neuron {neuron} {field} must be finite, got {value}"),
+        ))
+    }
+}
+
+fn validate_fatigue_and_baseline(
+    n: usize,
+    channel_fatigue: &[f32],
+    baseline_weights: &[Vec<f32>],
+) -> Result<()> {
     if channel_fatigue.len() != n {
         return Err(MeshError::invalid_router_config(
             "channel_fatigue",
@@ -1026,288 +1057,112 @@ mod validate_tests {
         err.to_string()
     }
 
+    enum BadValue {
+        Count(usize),
+        Float(f32),
+    }
+
     struct InvalidCase {
         name: &'static str,
         field: &'static str,
-        mutate: fn(&mut RouterConfig),
-        json_representable: bool,
+        value: BadValue,
+    }
+
+    fn apply_bad(config: &mut RouterConfig, field: &str, value: &BadValue) {
+        match (field, value) {
+            ("channel_count", BadValue::Count(v)) => config.channel_count = *v,
+            ("routing_timesteps", BadValue::Count(v)) => config.routing_timesteps = *v,
+            ("self_weight", BadValue::Float(v)) => config.self_weight = *v,
+            ("cross_weight", BadValue::Float(v)) => config.cross_weight = *v,
+            ("threshold", BadValue::Float(v)) => config.threshold = *v,
+            ("leak", BadValue::Float(v)) => config.leak = *v,
+            ("min_fire_rate", BadValue::Float(v)) => config.min_fire_rate = *v,
+            ("plasticity_decay", BadValue::Float(v)) => config.plasticity_decay = *v,
+            ("plasticity_potentiate", BadValue::Float(v)) => config.plasticity_potentiate = *v,
+            ("plasticity_speed", BadValue::Float(v)) => config.plasticity_speed = *v,
+            ("fatigue_accumulation", BadValue::Float(v)) => config.fatigue_accumulation = *v,
+            ("fatigue_recovery", BadValue::Float(v)) => config.fatigue_recovery = *v,
+            _ => panic!("unhandled invalid-case field {field}"),
+        }
+    }
+
+    fn json_representable(value: &BadValue) -> bool {
+        match *value {
+            BadValue::Count(_) => true,
+            BadValue::Float(v) => v.is_finite(),
+        }
     }
 
     fn invalid_cases() -> Vec<InvalidCase> {
-        fn set_channel_count_zero(c: &mut RouterConfig) {
-            c.channel_count = 0;
-        }
-        fn set_channel_count_over_max(c: &mut RouterConfig) {
-            c.channel_count = MAX_ROUTER_CHANNELS + 1;
-        }
-        fn set_channel_count_usize_max(c: &mut RouterConfig) {
-            c.channel_count = usize::MAX;
-        }
-        fn set_timesteps_zero(c: &mut RouterConfig) {
-            c.routing_timesteps = 0;
-        }
-        fn set_self_nan(c: &mut RouterConfig) {
-            c.self_weight = f32::NAN;
-        }
-        fn set_self_inf(c: &mut RouterConfig) {
-            c.self_weight = f32::INFINITY;
-        }
-        fn set_cross_neg_inf(c: &mut RouterConfig) {
-            c.cross_weight = f32::NEG_INFINITY;
-        }
-        fn set_threshold_nan(c: &mut RouterConfig) {
-            c.threshold = f32::NAN;
-        }
-        fn set_leak_below(c: &mut RouterConfig) {
-            c.leak = -0.01;
-        }
-        fn set_leak_above(c: &mut RouterConfig) {
-            c.leak = 1.01;
-        }
-        fn set_leak_nan(c: &mut RouterConfig) {
-            c.leak = f32::NAN;
-        }
-        fn set_leak_inf(c: &mut RouterConfig) {
-            c.leak = f32::INFINITY;
-        }
-        fn set_min_fire_below(c: &mut RouterConfig) {
-            c.min_fire_rate = -0.01;
-        }
-        fn set_min_fire_above(c: &mut RouterConfig) {
-            c.min_fire_rate = 1.01;
-        }
-        fn set_min_fire_nan(c: &mut RouterConfig) {
-            c.min_fire_rate = f32::NAN;
-        }
-        fn set_decay_below(c: &mut RouterConfig) {
-            c.plasticity_decay = -0.01;
-        }
-        fn set_decay_above(c: &mut RouterConfig) {
-            c.plasticity_decay = 1.01;
-        }
-        fn set_decay_nan(c: &mut RouterConfig) {
-            c.plasticity_decay = f32::NAN;
-        }
-        fn set_potentiate_neg(c: &mut RouterConfig) {
-            c.plasticity_potentiate = -0.01;
-        }
-        fn set_potentiate_nan(c: &mut RouterConfig) {
-            c.plasticity_potentiate = f32::NAN;
-        }
-        fn set_potentiate_inf(c: &mut RouterConfig) {
-            c.plasticity_potentiate = f32::INFINITY;
-        }
-        fn set_speed_below(c: &mut RouterConfig) {
-            c.plasticity_speed = -0.01;
-        }
-        fn set_speed_above(c: &mut RouterConfig) {
-            c.plasticity_speed = 1.01;
-        }
-        fn set_speed_nan(c: &mut RouterConfig) {
-            c.plasticity_speed = f32::NAN;
-        }
-        fn set_fatigue_acc_below(c: &mut RouterConfig) {
-            c.fatigue_accumulation = -0.01;
-        }
-        fn set_fatigue_acc_above(c: &mut RouterConfig) {
-            c.fatigue_accumulation = 1.01;
-        }
-        fn set_fatigue_acc_nan(c: &mut RouterConfig) {
-            c.fatigue_accumulation = f32::NAN;
-        }
-        fn set_fatigue_rec_below(c: &mut RouterConfig) {
-            c.fatigue_recovery = -0.01;
-        }
-        fn set_fatigue_rec_above(c: &mut RouterConfig) {
-            c.fatigue_recovery = 1.01;
-        }
-        fn set_fatigue_rec_inf(c: &mut RouterConfig) {
-            c.fatigue_recovery = f32::INFINITY;
-        }
-        vec![
-            InvalidCase {
-                name: "channel_count_zero",
-                field: "channel_count",
-                mutate: set_channel_count_zero,
-                json_representable: true,
-            },
-            InvalidCase {
-                name: "channel_count_over_max",
-                field: "channel_count",
-                mutate: set_channel_count_over_max,
-                json_representable: true,
-            },
-            InvalidCase {
-                name: "channel_count_usize_max",
-                field: "channel_count",
-                mutate: set_channel_count_usize_max,
-                json_representable: true,
-            },
-            InvalidCase {
-                name: "routing_timesteps_zero",
-                field: "routing_timesteps",
-                mutate: set_timesteps_zero,
-                json_representable: true,
-            },
-            InvalidCase {
-                name: "self_weight_nan",
-                field: "self_weight",
-                mutate: set_self_nan,
-                json_representable: false,
-            },
-            InvalidCase {
-                name: "self_weight_inf",
-                field: "self_weight",
-                mutate: set_self_inf,
-                json_representable: false,
-            },
-            InvalidCase {
-                name: "cross_weight_neg_inf",
-                field: "cross_weight",
-                mutate: set_cross_neg_inf,
-                json_representable: false,
-            },
-            InvalidCase {
-                name: "threshold_nan",
-                field: "threshold",
-                mutate: set_threshold_nan,
-                json_representable: false,
-            },
-            InvalidCase {
-                name: "leak_below",
-                field: "leak",
-                mutate: set_leak_below,
-                json_representable: true,
-            },
-            InvalidCase {
-                name: "leak_above",
-                field: "leak",
-                mutate: set_leak_above,
-                json_representable: true,
-            },
-            InvalidCase {
-                name: "leak_nan",
-                field: "leak",
-                mutate: set_leak_nan,
-                json_representable: false,
-            },
-            InvalidCase {
-                name: "leak_inf",
-                field: "leak",
-                mutate: set_leak_inf,
-                json_representable: false,
-            },
-            InvalidCase {
-                name: "min_fire_rate_below",
-                field: "min_fire_rate",
-                mutate: set_min_fire_below,
-                json_representable: true,
-            },
-            InvalidCase {
-                name: "min_fire_rate_above",
-                field: "min_fire_rate",
-                mutate: set_min_fire_above,
-                json_representable: true,
-            },
-            InvalidCase {
-                name: "min_fire_rate_nan",
-                field: "min_fire_rate",
-                mutate: set_min_fire_nan,
-                json_representable: false,
-            },
-            InvalidCase {
-                name: "plasticity_decay_below",
-                field: "plasticity_decay",
-                mutate: set_decay_below,
-                json_representable: true,
-            },
-            InvalidCase {
-                name: "plasticity_decay_above",
-                field: "plasticity_decay",
-                mutate: set_decay_above,
-                json_representable: true,
-            },
-            InvalidCase {
-                name: "plasticity_decay_nan",
-                field: "plasticity_decay",
-                mutate: set_decay_nan,
-                json_representable: false,
-            },
-            InvalidCase {
-                name: "plasticity_potentiate_negative",
-                field: "plasticity_potentiate",
-                mutate: set_potentiate_neg,
-                json_representable: true,
-            },
-            InvalidCase {
-                name: "plasticity_potentiate_nan",
-                field: "plasticity_potentiate",
-                mutate: set_potentiate_nan,
-                json_representable: false,
-            },
-            InvalidCase {
-                name: "plasticity_potentiate_inf",
-                field: "plasticity_potentiate",
-                mutate: set_potentiate_inf,
-                json_representable: false,
-            },
-            InvalidCase {
-                name: "plasticity_speed_below",
-                field: "plasticity_speed",
-                mutate: set_speed_below,
-                json_representable: true,
-            },
-            InvalidCase {
-                name: "plasticity_speed_above",
-                field: "plasticity_speed",
-                mutate: set_speed_above,
-                json_representable: true,
-            },
-            InvalidCase {
-                name: "plasticity_speed_nan",
-                field: "plasticity_speed",
-                mutate: set_speed_nan,
-                json_representable: false,
-            },
-            InvalidCase {
-                name: "fatigue_accumulation_below",
-                field: "fatigue_accumulation",
-                mutate: set_fatigue_acc_below,
-                json_representable: true,
-            },
-            InvalidCase {
-                name: "fatigue_accumulation_above",
-                field: "fatigue_accumulation",
-                mutate: set_fatigue_acc_above,
-                json_representable: true,
-            },
-            InvalidCase {
-                name: "fatigue_accumulation_nan",
-                field: "fatigue_accumulation",
-                mutate: set_fatigue_acc_nan,
-                json_representable: false,
-            },
-            InvalidCase {
-                name: "fatigue_recovery_below",
-                field: "fatigue_recovery",
-                mutate: set_fatigue_rec_below,
-                json_representable: true,
-            },
-            InvalidCase {
-                name: "fatigue_recovery_above",
-                field: "fatigue_recovery",
-                mutate: set_fatigue_rec_above,
-                json_representable: true,
-            },
-            InvalidCase {
-                name: "fatigue_recovery_inf",
-                field: "fatigue_recovery",
-                mutate: set_fatigue_rec_inf,
-                json_representable: false,
-            },
-        ]
+        let counts = [
+            ("channel_count_zero", "channel_count", 0usize),
+            (
+                "channel_count_over_max",
+                "channel_count",
+                MAX_ROUTER_CHANNELS + 1,
+            ),
+            ("channel_count_usize_max", "channel_count", usize::MAX),
+            ("routing_timesteps_zero", "routing_timesteps", 0),
+            (
+                "routing_timesteps_over_max",
+                "routing_timesteps",
+                MAX_ROUTING_TIMESTEPS + 1,
+            ),
+        ];
+        let floats = [
+            ("self_weight_nan", "self_weight", f32::NAN),
+            ("self_weight_inf", "self_weight", f32::INFINITY),
+            ("cross_weight_neg_inf", "cross_weight", f32::NEG_INFINITY),
+            ("threshold_nan", "threshold", f32::NAN),
+            ("leak_below", "leak", -0.01),
+            ("leak_above", "leak", 1.01),
+            ("leak_nan", "leak", f32::NAN),
+            ("leak_inf", "leak", f32::INFINITY),
+            ("min_fire_rate_below", "min_fire_rate", -0.01),
+            ("min_fire_rate_above", "min_fire_rate", 1.01),
+            ("min_fire_rate_nan", "min_fire_rate", f32::NAN),
+            ("plasticity_decay_below", "plasticity_decay", -0.01),
+            ("plasticity_decay_above", "plasticity_decay", 1.01),
+            ("plasticity_decay_nan", "plasticity_decay", f32::NAN),
+            (
+                "plasticity_potentiate_negative",
+                "plasticity_potentiate",
+                -0.01,
+            ),
+            (
+                "plasticity_potentiate_nan",
+                "plasticity_potentiate",
+                f32::NAN,
+            ),
+            (
+                "plasticity_potentiate_inf",
+                "plasticity_potentiate",
+                f32::INFINITY,
+            ),
+            ("plasticity_speed_below", "plasticity_speed", -0.01),
+            ("plasticity_speed_above", "plasticity_speed", 1.01),
+            ("plasticity_speed_nan", "plasticity_speed", f32::NAN),
+            ("fatigue_accumulation_below", "fatigue_accumulation", -0.01),
+            ("fatigue_accumulation_above", "fatigue_accumulation", 1.01),
+            ("fatigue_accumulation_nan", "fatigue_accumulation", f32::NAN),
+            ("fatigue_recovery_below", "fatigue_recovery", -0.01),
+            ("fatigue_recovery_above", "fatigue_recovery", 1.01),
+            ("fatigue_recovery_inf", "fatigue_recovery", f32::INFINITY),
+        ];
+        counts
+            .into_iter()
+            .map(|(name, field, value)| InvalidCase {
+                name,
+                field,
+                value: BadValue::Count(value),
+            })
+            .chain(floats.into_iter().map(|(name, field, value)| InvalidCase {
+                name,
+                field,
+                value: BadValue::Float(value),
+            }))
+            .collect()
     }
-
     #[test]
     fn default_config_is_valid() {
         RouterConfig::default().validate().unwrap();
@@ -1317,7 +1172,7 @@ mod validate_tests {
     fn table_rejects_every_invalid_config_field() {
         for case in invalid_cases() {
             let mut config = RouterConfig::default();
-            (case.mutate)(&mut config);
+            apply_bad(&mut config, case.field, &case.value);
             let err = match config.validate() {
                 Err(err) => err,
                 Ok(()) => panic!("{}: validate should fail", case.name),
@@ -1342,17 +1197,12 @@ mod validate_tests {
                 case.name
             );
 
-            if !case.json_representable {
+            if !json_representable(&case.value) {
                 continue;
             }
-            let mut config_json = serde_json::to_value(RouterConfig::default()).unwrap();
             let mut mutated = RouterConfig::default();
-            (case.mutate)(&mut mutated);
-            // Copy the mutated field through JSON so constructor and serde see
-            // the same representable value (usize::MAX, 0, out-of-range f32).
-            let mutated_json = serde_json::to_value(&mutated).unwrap();
-            config_json[case.field] = mutated_json[case.field].clone();
-            let config_msg = serde_field_from_config_json(config_json.clone());
+            apply_bad(&mut mutated, case.field, &case.value);
+            let config_msg = serde_field_from_config_json(serde_json::to_value(&mutated).unwrap());
             assert!(
                 config_msg.contains(case.field),
                 "{}: RouterConfig serde missing field name: {config_msg}",
@@ -1365,8 +1215,8 @@ mod validate_tests {
                 err
             );
 
-            let mut router_json = serde_json::to_value(ChannelRouter::new()).unwrap();
-            router_json["config"][case.field] = mutated_json[case.field].clone();
+            let mut router_json = serde_json::to_value(ChannelRouter::default()).unwrap();
+            router_json["config"] = serde_json::to_value(&mutated).unwrap();
             let router_msg = serde_field_from_router_json(router_json);
             assert!(
                 router_msg.contains(case.field),
@@ -1382,153 +1232,43 @@ mod validate_tests {
         }
     }
 
+    type BoundaryMutator = fn(&mut RouterConfig);
+
+    fn valid_boundary_mutators() -> Vec<(&'static str, BoundaryMutator)> {
+        vec![
+            ("min_channels", |c| c.channel_count = 1),
+            ("max_channels_validate_only", |c| {
+                c.channel_count = MAX_ROUTER_CHANNELS
+            }),
+            ("leak_0", |c| c.leak = 0.0),
+            ("leak_1", |c| c.leak = 1.0),
+            ("min_fire_0", |c| c.min_fire_rate = 0.0),
+            ("min_fire_1", |c| c.min_fire_rate = 1.0),
+            ("decay_0", |c| c.plasticity_decay = 0.0),
+            ("decay_1", |c| c.plasticity_decay = 1.0),
+            ("potentiate_0", |c| c.plasticity_potentiate = 0.0),
+            ("speed_0", |c| c.plasticity_speed = 0.0),
+            ("speed_1", |c| c.plasticity_speed = 1.0),
+            ("fatigue_acc_0", |c| c.fatigue_accumulation = 0.0),
+            ("fatigue_acc_1", |c| c.fatigue_accumulation = 1.0),
+            ("fatigue_rec_0", |c| c.fatigue_recovery = 0.0),
+            ("fatigue_rec_1", |c| c.fatigue_recovery = 1.0),
+            ("signed_cross_inhibition", |c| c.cross_weight = -1.0),
+            ("positive_cross_weight", |c| c.cross_weight = 0.25),
+            ("signed_self_weight", |c| c.self_weight = -0.3),
+            ("zero_threshold", |c| c.threshold = 0.0),
+            ("one_timestep", |c| c.routing_timesteps = 1),
+            ("max_timesteps", |c| {
+                c.routing_timesteps = MAX_ROUTING_TIMESTEPS
+            }),
+        ]
+    }
+
     #[test]
     fn valid_boundaries_round_trip() {
-        let default = RouterConfig::default();
-        let cases = [
-            (
-                "min_channels",
-                RouterConfig {
-                    channel_count: 1,
-                    ..default.clone()
-                },
-            ),
-            (
-                "max_channels_validate_only",
-                RouterConfig {
-                    channel_count: MAX_ROUTER_CHANNELS,
-                    ..default.clone()
-                },
-            ),
-            (
-                "leak_0",
-                RouterConfig {
-                    leak: 0.0,
-                    ..default.clone()
-                },
-            ),
-            (
-                "leak_1",
-                RouterConfig {
-                    leak: 1.0,
-                    ..default.clone()
-                },
-            ),
-            (
-                "min_fire_0",
-                RouterConfig {
-                    min_fire_rate: 0.0,
-                    ..default.clone()
-                },
-            ),
-            (
-                "min_fire_1",
-                RouterConfig {
-                    min_fire_rate: 1.0,
-                    ..default.clone()
-                },
-            ),
-            (
-                "decay_0",
-                RouterConfig {
-                    plasticity_decay: 0.0,
-                    ..default.clone()
-                },
-            ),
-            (
-                "decay_1",
-                RouterConfig {
-                    plasticity_decay: 1.0,
-                    ..default.clone()
-                },
-            ),
-            (
-                "potentiate_0",
-                RouterConfig {
-                    plasticity_potentiate: 0.0,
-                    ..default.clone()
-                },
-            ),
-            (
-                "speed_0",
-                RouterConfig {
-                    plasticity_speed: 0.0,
-                    ..default.clone()
-                },
-            ),
-            (
-                "speed_1",
-                RouterConfig {
-                    plasticity_speed: 1.0,
-                    ..default.clone()
-                },
-            ),
-            (
-                "fatigue_acc_0",
-                RouterConfig {
-                    fatigue_accumulation: 0.0,
-                    ..default.clone()
-                },
-            ),
-            (
-                "fatigue_acc_1",
-                RouterConfig {
-                    fatigue_accumulation: 1.0,
-                    ..default.clone()
-                },
-            ),
-            (
-                "fatigue_rec_0",
-                RouterConfig {
-                    fatigue_recovery: 0.0,
-                    ..default.clone()
-                },
-            ),
-            (
-                "fatigue_rec_1",
-                RouterConfig {
-                    fatigue_recovery: 1.0,
-                    ..default.clone()
-                },
-            ),
-            (
-                "signed_cross_inhibition",
-                RouterConfig {
-                    cross_weight: -1.0,
-                    ..default.clone()
-                },
-            ),
-            (
-                "positive_cross_weight",
-                RouterConfig {
-                    cross_weight: 0.25,
-                    ..default.clone()
-                },
-            ),
-            (
-                "signed_self_weight",
-                RouterConfig {
-                    self_weight: -0.3,
-                    ..default.clone()
-                },
-            ),
-            (
-                "zero_threshold",
-                RouterConfig {
-                    threshold: 0.0,
-                    ..default.clone()
-                },
-            ),
-            (
-                "one_timestep",
-                RouterConfig {
-                    routing_timesteps: 1,
-                    ..default
-                },
-            ),
-        ];
-
-        for (name, config) in cases {
+        for (name, mutate) in valid_boundary_mutators() {
+            let mut config = RouterConfig::default();
+            mutate(&mut config);
             config
                 .validate()
                 .unwrap_or_else(|err| panic!("{name}: valid boundary rejected: {err}"));
@@ -1537,8 +1277,6 @@ mod validate_tests {
                 .unwrap_or_else(|err| panic!("{name}: valid config failed to deserialize: {err}"));
             assert_eq!(restored, config, "{name}: config round-trip");
 
-            // Skip constructing the 1024-channel router in this table; the
-            // dedicated max-channel test covers allocation after validation.
             if config.channel_count == MAX_ROUTER_CHANNELS {
                 continue;
             }
@@ -1560,7 +1298,7 @@ mod validate_tests {
 
     #[test]
     fn custom_and_default_routers_round_trip() {
-        let default_router = ChannelRouter::new();
+        let default_router = ChannelRouter::default();
         let json = serde_json::to_value(&default_router).unwrap();
         let restored: ChannelRouter = serde_json::from_value(json).unwrap();
         assert_eq!(restored.config(), default_router.config());
@@ -1615,7 +1353,7 @@ mod validate_tests {
 
     #[test]
     fn malformed_shapes_are_rejected_with_matching_fields() {
-        let router = ChannelRouter::new();
+        let router = ChannelRouter::default();
         let base = serde_json::to_value(&router).unwrap();
 
         let mut empty_inner = base.clone();
@@ -1657,7 +1395,7 @@ mod validate_tests {
 
     #[test]
     fn legacy_snapshot_without_optional_fields_deserializes() {
-        let router = ChannelRouter::new();
+        let router = ChannelRouter::default();
         let mut json = serde_json::to_value(&router).unwrap();
         let obj = json.as_object_mut().unwrap();
         obj.remove("config");
@@ -1669,8 +1407,8 @@ mod validate_tests {
         assert_eq!(restored.config().channel_count, 3);
         assert_eq!(restored.weight_matrix().len(), 3);
         assert_eq!(restored.fatigue(), &[0.0, 0.0, 0.0]);
-        let _ = restored
-            .clone()
+        let mut restored = restored;
+        restored
             .route_modulated([0.5, 0.0, 0.0], &NeuromodState::balanced())
             .unwrap();
     }

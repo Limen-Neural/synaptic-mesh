@@ -204,7 +204,7 @@ fn route_modulated_error_context_reports_internal_method_name() {
 }
 
 #[test]
-#[should_panic(expected = "invalid router config (routing_timesteps): must be > 0")]
+#[should_panic(expected = "invalid router config (routing_timesteps): must be in 1..=4096, got 0")]
 fn zero_routing_timesteps_panics() {
     let config = RouterConfig {
         routing_timesteps: 0,

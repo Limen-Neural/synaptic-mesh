@@ -11,8 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Router**: `RouterConfig::validate` and `ChannelRouter::try_with_config`
   reject non-finite parameters, out-of-range rates, zero `routing_timesteps`,
-  and channel counts outside `1..=MAX_ROUTER_CHANNELS` (1024). Validation
-  runs before the dense weight tables are allocated. `ChannelRouter`
+  and channel counts outside `1..=MAX_ROUTER_CHANNELS` (1024). `routing_timesteps`
+  is capped at `MAX_ROUTING_TIMESTEPS` (4096). Validation runs before the dense weight tables are allocated. `ChannelRouter`
   deserialization uses the same checks plus neuron / fatigue / baseline
   shape agreement. Missing `config` / `channel_fatigue` / `baseline_weights`
   on legacy snapshots are still filled in (issue LIM-1228).
