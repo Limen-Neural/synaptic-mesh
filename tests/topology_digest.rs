@@ -23,6 +23,10 @@ const GOLDEN_EMPTY_3: &str = "synaptic-wiring.topology.digest.v1:sha256:a2c1014a
 /// Golden v1 digest for the three-edge fixture (any insertion order).
 const GOLDEN_SMALL: &str = "synaptic-wiring.topology.digest.v1:sha256:be1786c690cda6d02d9c6fa06d1844642398ecebab3d19ccec981062711cd36f";
 
+/// Golden v1 digest for excitatory `+0.0` vs `-0.0` (IEEE bit patterns differ).
+const GOLDEN_PLUS_ZERO: &str = "synaptic-wiring.topology.digest.v1:sha256:72c7a0686739be822c0dedf46f71dee35a2c154b3debc37019afe9ece19ae9d0";
+const GOLDEN_MINUS_ZERO: &str = "synaptic-wiring.topology.digest.v1:sha256:1b9b1789b7aed14363f73ed4f3c5708fc05180166ee7b9f620212f57d2a5812f";
+
 fn desc(
     source: u32,
     target: u32,
@@ -117,4 +121,17 @@ fn topology_digest_field_changes_are_detected() {
         assert_ne!(changed, base, "{label} change must change the digest");
         assert_ne!(changed.to_string(), GOLDEN_SMALL);
     }
+}
+
+#[test]
+fn topology_digest_signed_zero_goldens() {
+    let plus = SynapticGraph::from_descriptors(2, &[desc(0, 1, 0.0, 0, Polarity::Excitatory)])
+        .unwrap()
+        .topology_digest();
+    let minus = SynapticGraph::from_descriptors(2, &[desc(0, 1, -0.0, 0, Polarity::Excitatory)])
+        .unwrap()
+        .topology_digest();
+    assert_eq!(plus.to_string(), GOLDEN_PLUS_ZERO);
+    assert_eq!(minus.to_string(), GOLDEN_MINUS_ZERO);
+    assert_ne!(GOLDEN_PLUS_ZERO, GOLDEN_MINUS_ZERO);
 }

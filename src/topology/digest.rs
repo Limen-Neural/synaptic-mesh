@@ -352,89 +352,11 @@ mod tests {
         }
     }
 
-    /// Golden v1 digest for a 0-neuron empty graph.
-    const GOLDEN_EMPTY_0: &str = "synaptic-wiring.topology.digest.v1:sha256:14f893289199426a03b83570fda63b60872dedfe03c0b52a46a2061445d7a608";
-
-    /// Golden v1 digest for a 3-neuron empty graph (neuron count is in the preimage).
-    const GOLDEN_EMPTY_3: &str = "synaptic-wiring.topology.digest.v1:sha256:a2c1014ab2a24a342e01878c5dbe69972e8ab4152cb36d2faf88ec210d0b6203";
-
-    /// Golden v1 digest for the three-edge fixture used across digest tests.
-    const GOLDEN_SMALL: &str = "synaptic-wiring.topology.digest.v1:sha256:be1786c690cda6d02d9c6fa06d1844642398ecebab3d19ccec981062711cd36f";
-
-    fn small_fixture(order: &[usize]) -> Vec<SynapseDescriptor> {
-        let base = [
-            desc(0, 1, 0.9, 3, Polarity::Excitatory),
-            desc(0, 2, 0.15, 1, Polarity::Inhibitory),
-            desc(1, 0, 0.5, 2, Polarity::Excitatory),
-        ];
-        order.iter().map(|&i| base[i]).collect()
-    }
-
-    #[test]
-    fn topology_digest_golden_empty_graphs() {
-        assert_eq!(
-            SynapticGraph::new(0).topology_digest().to_string(),
-            GOLDEN_EMPTY_0
-        );
-        assert_eq!(
-            SynapticGraph::new(3).topology_digest().to_string(),
-            GOLDEN_EMPTY_3
-        );
-        assert_ne!(GOLDEN_EMPTY_0, GOLDEN_EMPTY_3);
-    }
-
-    #[test]
-    fn topology_digest_golden_small_fixture() {
-        let graph = SynapticGraph::from_descriptors(3, &small_fixture(&[0, 1, 2])).unwrap();
-        assert_eq!(graph.topology_digest().to_string(), GOLDEN_SMALL);
-    }
-
-    #[test]
-    fn topology_digest_insertion_order_permutations_agree() {
-        let orders = [
-            [0, 1, 2],
-            [0, 2, 1],
-            [1, 0, 2],
-            [1, 2, 0],
-            [2, 0, 1],
-            [2, 1, 0],
-        ];
-        let expected = SynapticGraph::from_descriptors(3, &small_fixture(&orders[0]))
-            .unwrap()
-            .topology_digest();
-        for order in orders {
-            let graph = SynapticGraph::from_descriptors(3, &small_fixture(&order)).unwrap();
-            assert_eq!(
-                graph.topology_digest(),
-                expected,
-                "insertion order {order:?} must not change the digest"
-            );
-            assert_eq!(graph.topology_digest().to_string(), GOLDEN_SMALL);
-        }
-    }
-
-    fn digest_of(descriptors: &[SynapseDescriptor]) -> TopologyDigest {
-        SynapticGraph::from_descriptors(3, descriptors)
-            .unwrap()
-            .topology_digest()
-    }
-
-    #[test]
-    fn topology_digest_changes_with_endpoint_delay_polarity_or_weight() {
-        let base = digest_of(&small_fixture(&[0, 1, 2]));
-        let mut endpoint = small_fixture(&[0, 1, 2]);
-        endpoint[0].target = 0;
-        let mut delay = small_fixture(&[0, 1, 2]);
-        delay[0].delay = 9;
-        let mut polarity = small_fixture(&[0, 1, 2]);
-        polarity[2].polarity = Polarity::Inhibitory;
-        let mut weight = small_fixture(&[0, 1, 2]);
-        weight[1].weight = 0.16;
-
-        assert_ne!(digest_of(&endpoint), base);
-        assert_ne!(digest_of(&delay), base);
-        assert_ne!(digest_of(&polarity), base);
-        assert_ne!(digest_of(&weight), base);
+    fn two_edge_fixture() -> [SynapseDescriptor; 2] {
+        [
+            desc(0, 1, 0.5, 2, Polarity::Excitatory),
+            desc(1, 0, 0.25, 1, Polarity::Inhibitory),
+        ]
     }
 
     #[test]
@@ -449,14 +371,6 @@ mod tests {
         assert_ne!(
             plus, minus,
             "+0.0 and -0.0 are distinct IEEE bit patterns and must digest differently"
-        );
-        assert_eq!(
-            plus.to_string(),
-            "synaptic-wiring.topology.digest.v1:sha256:72c7a0686739be822c0dedf46f71dee35a2c154b3debc37019afe9ece19ae9d0"
-        );
-        assert_eq!(
-            minus.to_string(),
-            "synaptic-wiring.topology.digest.v1:sha256:1b9b1789b7aed14363f73ed4f3c5708fc05180166ee7b9f620212f57d2a5812f"
         );
     }
 
@@ -477,7 +391,7 @@ mod tests {
 
     #[test]
     fn topology_digest_is_printable_and_round_trips() {
-        let digest = SynapticGraph::from_descriptors(3, &small_fixture(&[2, 0, 1]))
+        let digest = SynapticGraph::from_descriptors(2, &two_edge_fixture())
             .unwrap()
             .topology_digest();
         let printed = digest.to_string();
@@ -493,10 +407,9 @@ mod tests {
 
     #[test]
     fn topology_digest_survives_graph_json_roundtrip() {
-        let graph = SynapticGraph::from_descriptors(3, &small_fixture(&[1, 2, 0])).unwrap();
+        let graph = SynapticGraph::from_descriptors(2, &two_edge_fixture()).unwrap();
         let json = serde_json::to_string(&graph).unwrap();
         let restored: SynapticGraph = serde_json::from_str(&json).unwrap();
         assert_eq!(graph.topology_digest(), restored.topology_digest());
-        assert_eq!(restored.topology_digest().to_string(), GOLDEN_SMALL);
     }
 }
