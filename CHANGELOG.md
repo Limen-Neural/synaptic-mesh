@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Tests**: `tests/checkpoint_resume.rs` — seeded property/fuzz coverage that a
+  restored `SynapticMesh` continues tick-for-tick identically to the live mesh
+  with spikes in flight (currents, tick, queued deliveries). Covers generated
+  graphs, signed weights, empty ticks, max-delay capacity, checkpoint-before-
+  delivery, JSON plus bincode restore, persisted regression seeds, and a
+  documented ignored nightly profile (`CHECKPOINT_RESUME_CASES`).
+  Invalid checkpoints stay rejected by the existing load-path tests rather
+  than being normalized here (LIM-1223).
 - **Packaging**: Docker + GHCR container for releases (`ghcr.io/limen-neural/synaptic-mesh`).
   Library crate (no `examples/` / `[[bin]]`), so the image is a rustdoc snapshot
   plus a version stamp rather than a fake binary. PR workflow verifies without
