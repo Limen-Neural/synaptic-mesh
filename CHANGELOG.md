@@ -39,6 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to stay on the same Rust version as `ci.yml`. JUnit results are
   uploaded from `target/nextest/ci/junit.xml` (issue #77 / LIM-1180).
 
+### Fixed
+
+- **Packaging**: Docker rustdoc snapshot path now matches the `synaptic-wiring`
+  crate name (`target/doc/synaptic_wiring/`) after the rename (LIM-1219).
+
 ## [0.3.0] - 2026-09-13
 
 Everything below ships as **0.3.0**, the first crates.io release: packaging,

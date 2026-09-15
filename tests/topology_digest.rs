@@ -10,7 +10,7 @@
 use synaptic_wiring::mesh::SynapticMesh;
 use synaptic_wiring::topology::{
     SynapticGraph, TOPOLOGY_DIGEST_ALGORITHM, TOPOLOGY_DIGEST_DOMAIN,
-    TOPOLOGY_DIGEST_SCHEMA_VERSION,
+    TOPOLOGY_DIGEST_SCHEMA_VERSION, TopologyDigest,
 };
 use synaptic_wiring::types::{Polarity, SynapseDescriptor};
 
@@ -134,4 +134,32 @@ fn topology_digest_signed_zero_goldens() {
     assert_eq!(plus.to_string(), GOLDEN_PLUS_ZERO);
     assert_eq!(minus.to_string(), GOLDEN_MINUS_ZERO);
     assert_ne!(GOLDEN_PLUS_ZERO, GOLDEN_MINUS_ZERO);
+}
+
+#[test]
+fn topology_digest_nan_is_rejected_before_hashing() {
+    assert!(
+        SynapticGraph::from_descriptors(2, &[desc(0, 1, f32::NAN, 0, Polarity::Excitatory)])
+            .is_err()
+    );
+    assert!(
+        SynapticGraph::from_descriptors(2, &[desc(0, 1, f32::INFINITY, 0, Polarity::Excitatory)])
+            .is_err()
+    );
+}
+
+#[test]
+fn topology_digest_print_and_graph_json_round_trip() {
+    let graph = SynapticGraph::from_descriptors(3, &small_edges(&[2, 0, 1])).unwrap();
+    let digest = graph.topology_digest();
+    let printed = digest.to_string();
+    assert_eq!(printed.parse::<TopologyDigest>().unwrap(), digest);
+    let json = serde_json::to_string(&digest).unwrap();
+    let restored: TopologyDigest = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored, digest);
+
+    let graph_json = serde_json::to_string(&graph).unwrap();
+    let restored_graph: SynapticGraph = serde_json::from_str(&graph_json).unwrap();
+    assert_eq!(restored_graph.topology_digest(), digest);
+    assert_eq!(digest.to_string(), GOLDEN_SMALL);
 }
