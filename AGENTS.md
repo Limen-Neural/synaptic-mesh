@@ -35,7 +35,7 @@ This file contains workflow and orientation notes for AI agents working on this 
 
 ## Workflow Policy
 
-- All `synaptic-mesh` work stays in `/home/raulmc/synaptic-mesh`.
+- All `synaptic-wiring` work stays in `/home/raulmc/synaptic-wiring`.
 - Sister crate: `corinth-canal` at `/home/raulmc/corinth-canal` (inspiration for architecture patterns).
 - Run `cargo check`, `cargo test` before closing substantial Rust changes.
 - Commits and PR titles should keep carrying Linear issue identifiers (Limen-Neural Linear team-number form) so Linear Release scanning can attach issues.
@@ -53,7 +53,7 @@ This file contains workflow and orientation notes for AI agents working on this 
 
 ## Repository Context
 
-- **Repo**: `Limen-Neural/synaptic-mesh`
+- **Repo**: `Limen-Neural/synaptic-wiring` (GitHub redirects the former `Limen-Neural/synaptic-mesh` path)
 - **Main branch**: `main`
 - **Language**: Rust (edition 2024)
 - **Key concepts**: SNN wiring, topology generation, axonal delays, CSR sparse maps, Dale's law

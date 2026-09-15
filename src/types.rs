@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Core types for `synaptic-mesh`.
+//! Core types for `synaptic-wiring`.
 //!
 //! Shared scalar types, measurement units, and configuration structs used
 //! across the topology, delay, and mesh modules.

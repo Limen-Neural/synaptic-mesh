@@ -5,6 +5,8 @@
 # git history (`fetch-depth: 0`).
 #
 # Pipeline: https://linear.app/rpd-34/pipeline/synaptic-mesh/releases
+#   (Linear pipeline slug is independent of the crates.io name
+#   `synaptic-wiring`; do not rewrite this URL to match the crate.)
 # Action:   linear/linear-release-action@v0  (issue #72 / LIM-1150)
 #
 # GitHub remains source of truth for issue state. Commits and PR titles

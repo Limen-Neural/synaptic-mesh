@@ -194,18 +194,19 @@ jobs:
           set -euo pipefail
           msrv=$(grep -m1 '^rust-version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
           version=$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
-          if [ -z "$msrv" ] || [ -z "$version" ]; then
-            echo "ERROR: could not read rust-version/version from Cargo.toml" >&2
+          pkg=$(grep -m1 '^name' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
+          if [ -z "$msrv" ] || [ -z "$version" ] || [ -z "$pkg" ]; then
+            echo "ERROR: could not read name/rust-version/version from Cargo.toml" >&2
             exit 1
           fi
           rustup toolchain list | grep -q "^${msrv}-" \
             || rustup toolchain install "$msrv" --profile minimal --no-self-update
           # Exact filename, not a glob: a restored cache can leave an older
           # .crate in target/package/ that tar would treat as a member path.
-          crate="target/package/synaptic-mesh-${version}.crate"
+          crate="target/package/${pkg}-${version}.crate"
           work=$(mktemp -d)
           tar -xzf "$crate" -C "$work"
-          cd "$work/synaptic-mesh-${version}"
+          cd "$work/${pkg}-${version}"
           cargo "+$msrv" check --locked --all-targets
 
   cargo-deny:

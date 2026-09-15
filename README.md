@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Limen-Neural/synaptic-mesh/main/docs/logo.png" width="220" alt="synaptic-mesh">
+  <img src="https://raw.githubusercontent.com/Limen-Neural/synaptic-wiring/main/docs/logo.png" width="220" alt="synaptic-wiring">
 </p>
 
-<h1 align="center">synaptic-mesh</h1>
+<h1 align="center">synaptic-wiring</h1>
 <p align="center">SNN wiring, topology generation, and temporal delay infrastructure</p>
 
 <p align="center">
@@ -12,11 +12,16 @@
 
 ---
 
-`synaptic-mesh` is the **connectivity layer** of a spiking neural network: it
+`synaptic-wiring` is the **connectivity layer** of a spiking neural network: it
 answers *which neuron connects to which*, *how strongly*, and *how long the
 spike takes to get there*. You bring the neuron model and the simulation loop;
 this crate wires the network and delivers each spike to the right target on the
 right tick.
+
+The Cargo package is `synaptic-wiring` (this crate was previously named
+`synaptic-mesh`). The GitHub repository is
+[`Limen-Neural/synaptic-wiring`](https://github.com/Limen-Neural/synaptic-wiring)
+(GitHub redirects the former `Limen-Neural/synaptic-mesh` URL).
 
 It is a plain library with one dependency (`serde`) — no framework, no runtime,
 no GPU requirement, and no assumptions about how your neurons integrate current.
@@ -60,7 +65,7 @@ crate. See [Crate boundary](#crate-boundary).
 
 ```toml
 [dependencies]
-synaptic-mesh = "0.3"
+synaptic-wiring = "0.3"
 ```
 
 `0.3.0` is **experimental, pre-1.0**: the API is usable and tested, but minor
@@ -70,22 +75,22 @@ releases may still contain breaking changes until 1.0. Pin an exact version
 For bleeding-edge changes that are not in a release yet, depend on git instead:
 
 ```toml
-synaptic-mesh = { git = "https://github.com/Limen-Neural/synaptic-mesh" }
+synaptic-wiring = { git = "https://github.com/Limen-Neural/synaptic-wiring" }
 ```
 
-Add `tag = "v0.3.0"` to pin a git dependency to a specific release instead of tracking `main` — see [releases](https://github.com/Limen-Neural/synaptic-mesh/releases) for the tags that exist today.
+Add `tag = "v0.3.0"` to pin a git dependency to a specific release instead of tracking `main` — see [releases](https://github.com/Limen-Neural/synaptic-wiring/releases) for the tags that exist today.
 
 **MSRV:** Rust **1.98.1**. The only runtime dependency is `serde`.
 
 Contributors: see
-[REVIEW.md](https://github.com/Limen-Neural/synaptic-mesh/blob/main/REVIEW.md#build-profiles)
+[REVIEW.md](https://github.com/Limen-Neural/synaptic-wiring/blob/main/REVIEW.md#build-profiles)
 for which cargo build profile (`dev`, `test`, `release`, `bench`) to use and why.
 
 ## Quick Start: Building a Mesh
 
 ```rust
-use synaptic_mesh::topology::generate_small_world;
-use synaptic_mesh::mesh::SynapticMesh;
+use synaptic_wiring::topology::generate_small_world;
+use synaptic_wiring::mesh::SynapticMesh;
 
 // 1. Build a 1024-neuron small-world network with delays up to 10 ticks
 // (N=1024, k=6 neighbors, beta=0.1 rewiring, max_delay=10, inh_fraction=0.2)
@@ -110,9 +115,9 @@ currents arriving *this* tick. It never decides what fires next — that is your
 neuron model's job. A complete simulation loop is therefore just:
 
 ```rust
-use synaptic_mesh::mesh::SynapticMesh;
-use synaptic_mesh::topology::SynapticGraph;
-use synaptic_mesh::types::{Polarity, SynapseDescriptor};
+use synaptic_wiring::mesh::SynapticMesh;
+use synaptic_wiring::topology::SynapticGraph;
+use synaptic_wiring::types::{Polarity, SynapseDescriptor};
 
 // Hand-built graph: 0 ──(w=0.75, delay 0, excitatory)──▶ 1
 //                   0 ──(w=0.50, delay 2, excitatory)──▶ 2
@@ -143,13 +148,13 @@ The rules it guarantees:
 | **What if two spikes land together?** | They sum at the destination. |
 | **Is it reproducible?** | Yes — same graph and spikes give the same currents, including after `reset()`. |
 
-[`tests/propagate_contract.rs`](https://github.com/Limen-Neural/synaptic-mesh/blob/main/tests/propagate_contract.rs)
+[`tests/propagate_contract.rs`](https://github.com/Limen-Neural/synaptic-wiring/blob/main/tests/propagate_contract.rs)
 pins every one of these against a fixed four-neuron graph and is a copyable
 starting point for your own loop.
 
 ## Topology Generation
 
-`synaptic-mesh` provides several deterministic models for growing network graphs. All generators use golden-ratio fractional hashing for reproducibility across runs without external RNG dependencies.
+`synaptic-wiring` provides several deterministic models for growing network graphs. All generators use golden-ratio fractional hashing for reproducibility across runs without external RNG dependencies.
 
 | Model | Generator | Best For |
 |-------|-----------|----------|
@@ -160,7 +165,7 @@ starting point for your own loop.
 
 ## Temporal Delays & Spike Propagation
 
-In biological networks, spikes do not arrive instantly. `synaptic-mesh` implements a temporal logic layer using a **Ring-Buffer Delay Queue**:
+In biological networks, spikes do not arrive instantly. `synaptic-wiring` implements a temporal logic layer using a **Ring-Buffer Delay Queue**:
 
 1.  Each synapse in the `SynapticGraph` stores a `DelayTicks` value.
 2.  When a neuron fires, its spike is projected through its outgoing synapses.
@@ -176,7 +181,7 @@ This enables complex temporal dynamics like polychronization and coincidence det
 `ChannelRouter` is a standalone, configurable multi-channel classifier: it integrates input pulses over a bank of internal integrate-and-fire units and returns a sparse activation mask (which channels won, and at what firing rate). It does not use `SynapticMesh` and `SynapticMesh` does not use it — they are independent halves of the crate.
 
 ```rust
-use synaptic_mesh::ChannelRouter;
+use synaptic_wiring::ChannelRouter;
 
 // Default 3-channel router. `route` returns a Result: it errors if the
 // signal slice length doesn't match the configured channel count.
@@ -190,7 +195,7 @@ assert_eq!(decision.firing_rates.len(), 3);
 ### Configurable Channel Count
 
 ```rust
-use synaptic_mesh::{ChannelRouter, RouterConfig};
+use synaptic_wiring::{ChannelRouter, RouterConfig};
 
 let config = RouterConfig {
     channel_count: 8,
@@ -219,7 +224,7 @@ This crate owns connectivity and timing, and nothing else:
 | CSR sparse maps and GPU-ready arrays | GPU kernels, hardware backends |
 | Optional `ChannelRouter` classifier | — |
 
-Neuron models are a deliberate omission, not a gap: pair this crate with whatever integrator you already use, or with a dedicated crate such as [`neuromod`](https://github.com/Limen-Neural/neuromod) (LIF, Izhikevich, Hodgkin-Huxley, GIF, FitzHugh-Nagumo, Lapicque). `synaptic-mesh` takes **no dependency** on it, so the two evolve independently.
+Neuron models are a deliberate omission, not a gap: pair this crate with whatever integrator you already use, or with a dedicated crate such as [`neuromod`](https://github.com/Limen-Neural/neuromod) (LIF, Izhikevich, Hodgkin-Huxley, GIF, FitzHugh-Nagumo, Lapicque). `synaptic-wiring` takes **no dependency** on it, so the two evolve independently.
 
 The one neuron-like type here, `NeuromodNeuron` in [`router`](src/router.rs), is an integration primitive internal to `ChannelRouter` — not a general-purpose neuron model.
 
@@ -227,7 +232,7 @@ The one neuron-like type here, `NeuromodNeuron` in [`router`](src/router.rs), is
 
 Spikenaut-SNN uses this crate for Dale-polarity wiring and multi-channel
 routing. That is a downstream consumer, not a requirement: nothing in the API
-assumes it, and depending on `synaptic-mesh` pulls in nothing beyond `serde`.
+assumes it, and depending on `synaptic-wiring` pulls in nothing beyond `serde`.
 
 ## Architecture
 

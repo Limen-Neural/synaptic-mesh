@@ -10,8 +10,8 @@
 //! # Usage
 //!
 //! ```rust
-//! use synaptic_mesh::mesh::SynapticMesh;
-//! use synaptic_mesh::topology::generate_random;
+//! use synaptic_wiring::mesh::SynapticMesh;
+//! use synaptic_wiring::topology::generate_random;
 //!
 //! let graph = generate_random(64, 0.1, 5, 0.2).unwrap();
 //! let mut mesh = SynapticMesh::new(graph);
@@ -193,9 +193,9 @@ impl SynapticMesh {
     /// [`reset`]: Self::reset
     ///
     /// ```rust
-    /// use synaptic_mesh::mesh::SynapticMesh;
-    /// use synaptic_mesh::topology::SynapticGraph;
-    /// use synaptic_mesh::types::{Polarity, SynapseDescriptor};
+    /// use synaptic_wiring::mesh::SynapticMesh;
+    /// use synaptic_wiring::topology::SynapticGraph;
+    /// use synaptic_wiring::types::{Polarity, SynapseDescriptor};
     ///
     /// // 0 ──(w=0.75, delay 0, excitatory)──▶ 1
     /// // 0 ──(w=0.50, delay 2, excitatory)──▶ 2
@@ -214,7 +214,7 @@ impl SynapticMesh {
     /// assert_eq!(mesh.propagate(&[false; 3])?, vec![0.0, 0.0, 0.0]);
     /// // Tick 2: the delay-2 synapse arrives at neuron 2.
     /// assert_eq!(mesh.propagate(&[false; 3])?, vec![0.0, 0.0, 0.50]);
-    /// # Ok::<(), synaptic_mesh::MeshError>(())
+    /// # Ok::<(), synaptic_wiring::MeshError>(())
     /// ```
     ///
     /// `tests/propagate_contract.rs` pins this contract — destination, sign,

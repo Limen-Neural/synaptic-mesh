@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Crate rename**: the Cargo package is now `synaptic-wiring` (was
+  `synaptic-mesh`) so the first crates.io publish does not collide with
+  [ruvnet/Synaptic-Mesh](https://github.com/ruvnet/Synaptic-Mesh). GitHub
+  URLs point at [`Limen-Neural/synaptic-wiring`](https://github.com/Limen-Neural/synaptic-wiring)
+  (the GitHub repository rename has landed; the old `synaptic-mesh` path
+  redirects). The `SynapticMesh` type is unchanged.
+
 ### Added
 
 - **CI**: Codecov coverage workflow (`.github/workflows/coverage.yml`)
@@ -24,7 +33,7 @@ crate without any Limen context. Issue #37 promotes this section to
 
 ### Added
 
-- **Packaging**: `documentation = "https://docs.rs/synaptic-mesh"` and an
+- **Packaging**: `documentation = "https://docs.rs/synaptic-wiring"` and an
   explicit `readme = "README.md"` in `Cargo.toml` (issue #34).
 - **Tests**: `tests/propagate_contract.rs` — deterministic consumer contract
   for `SynapticMesh::propagate` over a fixed four-neuron graph, asserting the
@@ -131,7 +140,7 @@ crate without any Limen context. Issue #37 promotes this section to
   CHANGELOG, and the metadata cargo generates itself (`Cargo.toml.orig`,
   `.cargo_vcs_info.json`).
 - **Docs**: README leads with the crates.io install path
-  (`synaptic-mesh = "0.3"`), marks the git dependency as the bleeding-edge
+  (`synaptic-wiring = "0.3"`), marks the git dependency as the bleeding-edge
   alternative, and describes 0.3.0 as experimental pre-1.0. Repo-relative
   logo and `REVIEW.md` links are absolute so they resolve on crates.io and
   docs.rs, where those files are not packaged (issue #34).
@@ -156,7 +165,7 @@ the build/test/bench setup ahead of packaging for publish.
   the command that uses it, and why it's configured that way, cross-linked
   from `Cargo.toml` and `README.md` (issue #43).
 
-[0.2.0]: https://github.com/Limen-Neural/synaptic-mesh/compare/v0.1.0...v0.2.0
+[0.2.0]: https://github.com/Limen-Neural/synaptic-wiring/compare/v0.1.0...v0.2.0
 
 ## [0.1.0] - 2026-08-14
 
@@ -224,6 +233,6 @@ First versioned history. Nothing before this tag was published or tagged.
   derivable impls, redundant borrows).
 - Fixed `cargo fmt` formatting (module ordering, debug_assert wrapping).
 
-[Unreleased]: https://github.com/Limen-Neural/synaptic-mesh/compare/v0.3.0...HEAD
-[0.3.0]: https://github.com/Limen-Neural/synaptic-mesh/compare/v0.2.0...v0.3.0
-[0.1.0]: https://github.com/Limen-Neural/synaptic-mesh/releases/tag/v0.1.0
+[Unreleased]: https://github.com/Limen-Neural/synaptic-wiring/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Limen-Neural/synaptic-wiring/compare/v0.2.0...v0.3.0
+[0.1.0]: https://github.com/Limen-Neural/synaptic-wiring/releases/tag/v0.1.0

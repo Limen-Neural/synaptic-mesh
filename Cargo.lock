@@ -87,7 +87,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "synaptic-mesh"
+name = "synaptic-wiring"
 version = "0.3.0"
 dependencies = [
  "serde",
