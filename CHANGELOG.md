@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Tests**: `tests/checkpoint_resume.rs` — seeded property/fuzz coverage that a
+- **Tests**: `tests/checkpoint_resume/` — seeded property/fuzz coverage that a
   restored `SynapticMesh` continues tick-for-tick identically to the live mesh
   with spikes in flight (currents, tick, queued deliveries). Covers generated
   graphs, signed weights, empty ticks, max-delay capacity, checkpoint-before-

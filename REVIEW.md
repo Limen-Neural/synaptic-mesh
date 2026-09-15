@@ -78,7 +78,7 @@ cargo clippy --all-features -- -D warnings
 ### Checkpoint resume property suite (LIM-1223)
 
 Default CI already runs this via `cargo test --locked`. The bounded profile is
-`tests/checkpoint_resume.rs`: 512 seeded cases plus named boundary/regression
+`tests/checkpoint_resume/`: 512 seeded cases plus named boundary/regression
 fixtures, restoring through JSON and postcard.
 
 For a longer ignored/nightly run (10_000 additional seeds by default):
