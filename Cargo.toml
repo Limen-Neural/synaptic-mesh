@@ -2,11 +2,12 @@
 name = "synaptic-mesh"
 version = "0.3.0"
 edition = "2024"
-# Keep identical to rust-toolchain.toml `channel` and the CI workflow
-# `toolchain:` pin (see REVIEW.md "MSRV pin rule").
+# Keep identical to rust-toolchain.toml `channel` and the CI / coverage
+# workflow `toolchain:` pins (see REVIEW.md "MSRV pin rule").
 rust-version = "1.98.1"
 license = "MIT OR Apache-2.0"
 description = "An SNN-based mesh for managing the wiring, topology, and temporal delays between neurons."
+authors = ["Raul Cardenas Montoya <montoyaraul34@gmail.com>"]
 repository = "https://github.com/Limen-Neural/synaptic-mesh"
 documentation = "https://docs.rs/synaptic-mesh"
 homepage = "https://docs.rs/synaptic-mesh"
@@ -21,6 +22,7 @@ categories = ["science", "algorithms", "simulation"]
 exclude = [
     "/docs/",
     "/.github/",
+    "/.config/",
     "/REVIEW.md",
     "/.codacy.yml",
     "/.deepsource.toml",

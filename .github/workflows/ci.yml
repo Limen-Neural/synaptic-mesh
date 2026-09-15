@@ -11,8 +11,12 @@ permissions:
 
 jobs:
   validate:
-    name: Build & Test
-    runs-on: ubuntu-latest
+    name: Build & Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     permissions:
       contents: read
     steps:
@@ -29,24 +33,30 @@ jobs:
           components: clippy, rustfmt
 
       - name: Verify MSRV pins agree
+        # Git Bash: grep/sed and the here-string must run on Windows too.
         shell: bash
         run: |
           set -euo pipefail
           strip_cr() { tr -d '\r'; }
           cargo_rv=$(grep -m1 '^rust-version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/' | strip_cr)
           toolchain_ch=$(grep -m1 '^channel' rust-toolchain.toml | sed -E 's/.*"([^"]+)".*/\1/' | strip_cr)
-          # Every `toolchain:` / `rust-version:` pin in this workflow must
-          # match Cargo.toml, so a job added later (or a partial bump) cannot
-          # introduce a second, silently diverging Rust version. Values are
-          # captured verbatim — `nightly`, `stable`, or `${{ matrix.rust }}`
-          # is a mismatch, not something to skip over.
-          ci_pins=$(grep -E '^[[:space:]]*(toolchain|rust-version):[[:space:]]*[^[:space:]]' \
-            .github/workflows/ci.yml | strip_cr \
-            | sed -E "s/^[[:space:]]*(toolchain|rust-version):[[:space:]]*//; s/[[:space:]]+\$//; s/^[\"'](.*)[\"']\$/\1/")
-          if [ -z "$ci_pins" ]; then
-            echo "ERROR: no toolchain:/rust-version: pin found in .github/workflows/ci.yml" >&2
-            exit 1
-          fi
+          # Every `toolchain:` / `rust-version:` pin in ci.yml and coverage.yml
+          # must match Cargo.toml, so a job added later (or a partial bump)
+          # cannot introduce a second, silently diverging Rust version.
+          # Values are captured verbatim — `nightly`, `stable`, or
+          # `${{ matrix.rust }}` is a mismatch, not something to skip over.
+          workflow_pins=""
+          for wf in .github/workflows/ci.yml .github/workflows/coverage.yml; do
+            pins=$(grep -E '^[[:space:]]*(toolchain|rust-version):[[:space:]]*[^[:space:]]' \
+              "$wf" | strip_cr \
+              | sed -E "s/^[[:space:]]*(toolchain|rust-version):[[:space:]]*//; s/[[:space:]]+\$//; s/^[\"'](.*)[\"']\$/\1/")
+            if [ -z "$pins" ]; then
+              echo "ERROR: no toolchain:/rust-version: pin found in $wf" >&2
+              exit 1
+            fi
+            printf '%s pins:\n%s\n' "$wf" "$(echo "$pins" | sed 's/^/  /')"
+            workflow_pins="${workflow_pins}${workflow_pins:+$'\n'}${pins}"
+          done
           # README states the MSRV for crates.io readers (#53); keep it honest.
           readme_rv=$(grep -m1 -oE 'MSRV[^0-9]*[0-9]+(\.[0-9]+)+' README.md \
             | grep -oE '[0-9]+(\.[0-9]+)+' | strip_cr)
@@ -64,15 +74,13 @@ jobs:
           echo "Cargo.toml rust-version=$cargo_rv"
           echo "rust-toolchain.toml channel=$toolchain_ch"
           echo "README.md MSRV=$readme_rv"
-          echo "Dockerfile FROM rust=$dockerfile_pin"
-          printf 'ci.yml pins:\n%s\n' "$(echo "$ci_pins" | sed 's/^/  /')"
           agree=0
           [ "$cargo_rv" = "$toolchain_ch" ] || agree=1
           [ "$cargo_rv" = "$readme_rv" ] || agree=1
           [ "$cargo_rv" = "$dockerfile_pin" ] || agree=1
           while read -r pin; do
             [ "$pin" = "$cargo_rv" ] || agree=1
-          done <<< "$ci_pins"
+          done <<< "$workflow_pins"
           if [ "$agree" -ne 0 ]; then
             echo "ERROR: MSRV pins disagree (all must equal Cargo.toml rust-version=$cargo_rv)." >&2
             exit 1
@@ -88,7 +96,9 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      # rustfmt is OS-independent; keep this on Linux only (neuromod / axon-encoder).
       - name: Check formatting
+        if: runner.os == 'Linux'
         run: cargo fmt --check
 
       - name: Clippy (lint)
