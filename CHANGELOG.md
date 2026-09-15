@@ -7,17 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- **Crate rename**: the Cargo package is now `synaptic-wiring` (was
-  `synaptic-mesh`) so the first crates.io publish does not collide with
-  [ruvnet/Synaptic-Mesh](https://github.com/ruvnet/Synaptic-Mesh). GitHub
-  URLs point at [`Limen-Neural/synaptic-wiring`](https://github.com/Limen-Neural/synaptic-wiring)
-  (the GitHub repository rename has landed; the old `synaptic-mesh` path
-  redirects). The `SynapticMesh` type is unchanged.
-
 ### Added
 
+- **Router**: `RouterConfig::validate` and `ChannelRouter::try_with_config`
+  reject non-finite parameters, out-of-range rates, zero `routing_timesteps`,
+  and channel counts outside `1..=MAX_ROUTER_CHANNELS` (1024). Validation
+  runs before the dense weight tables are allocated. `ChannelRouter`
+  deserialization uses the same checks plus neuron / fatigue / baseline
+  shape agreement. Missing `config` / `channel_fatigue` / `baseline_weights`
+  on legacy snapshots are still filled in (issue LIM-1228).
+- **Errors**: `MeshError::InvalidRouterConfig { field, reason }` so
+  constructor and serde paths share a matchable field category.
 - **Packaging**: Docker + GHCR container for releases (`ghcr.io/limen-neural/synaptic-mesh`).
   Library crate (no `examples/` / `[[bin]]`), so the image is a rustdoc snapshot
   plus a version stamp rather than a fake binary. PR workflow verifies without
@@ -31,6 +31,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The MSRV pin-agreement check now also requires `coverage.yml`
   to stay on the same Rust version as `ci.yml`. JUnit results are
   uploaded from `target/nextest/ci/junit.xml` (issue #77 / LIM-1180).
+
+### Changed
+
+- **Router**: `ChannelRouter::with_config` still panics on invalid config,
+  but now delegates to `try_with_config` (same pattern as
+  `SynapticMesh::with_max_delay`). Signed self/cross weights remain
+  allowed; leak and other documented fractions are enforced as `0.0..=1.0`.
+- **Crate rename**: the Cargo package is now `synaptic-wiring` (was
+  `synaptic-mesh`) so the first crates.io publish does not collide with
+  [ruvnet/Synaptic-Mesh](https://github.com/ruvnet/Synaptic-Mesh). GitHub
+  URLs point at [`Limen-Neural/synaptic-wiring`](https://github.com/Limen-Neural/synaptic-wiring)
+  (the GitHub repository rename has landed; the old `synaptic-mesh` path
+  redirects). The `SynapticMesh` type is unchanged.
+
+### Fixed
+
+- **Router**: invalid `RouterConfig` values and malformed `ChannelRouter`
+  checkpoints are rejected at construction and deserialize time instead of
+  panicking later or restoring inconsistent vector shapes (issue LIM-1228).
 
 ## [0.3.0] - 2026-09-13
 
