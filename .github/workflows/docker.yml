@@ -196,12 +196,12 @@ jobs:
             fi
             ahead=$(gh api "repos/${GITHUB_REPOSITORY}/compare/main...${SHA}" --jq '.ahead_by')
             if [ "${ahead}" != "0" ]; then
-              echo "::error::Git tag '${GITHUB_REF}' points at ${SHA}, which is not on origin/main (compare ahead_by=${ahead}); refusing to publish :${VER} and :latest from an unreviewed commit"
-              exit 1
-            fi
-            TAGS="${TAGS},${GHCR}:${VER},${GHCR}:latest"
-            if [ "${HUB_ENABLED}" = "true" ] && [ -n "${HUB_USER}" ]; then
-              TAGS="${TAGS},${HUB_USER}/synaptic-mesh:${VER},${HUB_USER}/synaptic-mesh:latest"
+              echo "::warning::Git tag '${GITHUB_REF}' points at ${SHA}, which is not on origin/main (compare ahead_by=${ahead}); publishing SHA only, not :${VER} or :latest"
+            else
+              TAGS="${TAGS},${GHCR}:${VER},${GHCR}:latest"
+              if [ "${HUB_ENABLED}" = "true" ] && [ -n "${HUB_USER}" ]; then
+                TAGS="${TAGS},${HUB_USER}/synaptic-mesh:${VER},${HUB_USER}/synaptic-mesh:latest"
+              fi
             fi
           fi
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
