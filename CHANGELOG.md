@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Docker**: rustdoc snapshot path is `synaptic_wiring/` (crate rename leftover
+  still asserted `synaptic_mesh/`, which failed docker verify).
 - **ChannelRouter**: `route` and `route_modulated` reject NaN/±Inf channel
   signals and neuromodulator fields before mutating neurons, fatigue,
   adaptive weights, or `total_routes`. Errors name the channel index
