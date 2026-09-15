@@ -18,7 +18,7 @@
 //! - queued delay-buffer deliveries (the checkpoint's `delay_buffer` slots)
 //! - the rest of the checkpoint snapshot (graph + buffer metadata)
 //!
-//! Restore is exercised through JSON and one non-JSON serde format (`bincode`,
+//! Restore is exercised through JSON and one non-JSON serde format (`postcard`,
 //! a dev-only dependency).
 //!
 //! # CI vs nightly
@@ -49,11 +49,13 @@ const CI_CASES: u64 = 512;
 /// Default seed count for [`resume_equivalence_nightly`].
 const NIGHTLY_CASES_DEFAULT: u64 = 10_000;
 
-/// Seeds that previously failed, or that pin a recipe at the start of the
-/// generator stream. Add every newly discovered failure here.
-const REGRESSION_SEEDS: &[u64] = &[
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, // one of each [`Recipe`] at the base stream
-];
+/// Env var that overrides [`NIGHTLY_CASES_DEFAULT`] for ignored nightly runs.
+const NIGHTLY_CASES_ENV: &str = "CHECKPOINT_RESUME_CASES";
+
+/// Once-failing seeds discovered outside the CI range (`0..CI_CASES`). Named
+/// boundary fixtures below pin the required edge cases. Add a seed here when
+/// nightly finds a new counterexample that is not already a named test.
+const REGRESSION_SEEDS: &[u64] = &[];
 
 /// Exact magnitudes used by the generator so snapshots stay easy to read.
 const WEIGHTS: [f32; 8] = [0.25, 0.5, 0.75, 1.0, 0.125, 1.5, 0.375, 0.625];
@@ -432,14 +434,14 @@ fn random_event(rng: &mut SplitMix64, n: usize) -> TickEvent {
 #[derive(Clone, Copy)]
 enum SerdeFormat {
     Json,
-    Bincode,
+    Postcard,
 }
 
 impl SerdeFormat {
     fn name(self) -> &'static str {
         match self {
             Self::Json => "json",
-            Self::Bincode => "bincode",
+            Self::Postcard => "postcard",
         }
     }
 
@@ -449,9 +451,10 @@ impl SerdeFormat {
                 let json = serde_json::to_string(mesh).expect("valid mesh must serialize to JSON");
                 serde_json::from_str(&json).expect("valid JSON checkpoint must deserialize")
             }
-            Self::Bincode => {
-                let bytes = bincode::serialize(mesh).expect("valid mesh must serialize to bincode");
-                bincode::deserialize(&bytes).expect("valid bincode checkpoint must deserialize")
+            Self::Postcard => {
+                let bytes =
+                    postcard::to_allocvec(mesh).expect("valid mesh must serialize to postcard");
+                postcard::from_bytes(&bytes).expect("valid postcard checkpoint must deserialize")
             }
         }
     }
@@ -498,7 +501,7 @@ fn meshes_equivalent(live: &SynapticMesh, restored: &SynapticMesh) -> Result<(),
 
 fn check_resume(scenario: &Scenario) -> Result<(), String> {
     check_resume_format(scenario, SerdeFormat::Json)?;
-    check_resume_format(scenario, SerdeFormat::Bincode)?;
+    check_resume_format(scenario, SerdeFormat::Postcard)?;
     Ok(())
 }
 
@@ -557,57 +560,56 @@ fn check_seed(seed: u64) {
 /// counterexample. It never runs on the passing CI path.
 fn shrink(scenario: &Scenario) -> Scenario {
     let mut best = scenario.clone();
-    let mut changed = true;
-    while changed {
-        changed = false;
-        if best.prefix.len() > 1 {
-            for i in 0..best.prefix.len() {
-                let mut candidate = best.clone();
-                candidate.prefix.remove(i);
-                if check_resume(&candidate).is_err() {
-                    best = candidate;
-                    changed = true;
-                    break;
-                }
-            }
-            if changed {
-                continue;
-            }
-        }
-        if best.suffix.len() > 1 {
-            for i in 0..best.suffix.len() {
-                let mut candidate = best.clone();
-                candidate.suffix.remove(i);
-                if check_resume(&candidate).is_err() {
-                    best = candidate;
-                    changed = true;
-                    break;
-                }
-            }
-            if changed {
-                continue;
-            }
-        }
-        if best.descriptors.len() > 1 {
-            for i in 0..best.descriptors.len() {
-                let mut candidate = best.clone();
-                candidate.descriptors.remove(i);
-                let graph_max = candidate
-                    .descriptors
-                    .iter()
-                    .map(|d| usize::from(d.delay))
-                    .max()
-                    .unwrap_or(0);
-                candidate.buffer_max_delay = candidate.buffer_max_delay.max(graph_max);
-                if check_resume(&candidate).is_err() {
-                    best = candidate;
-                    changed = true;
-                    break;
-                }
-            }
-        }
+    while let Some(smaller) = shrink_step(&best) {
+        best = smaller;
     }
     best
+}
+
+fn shrink_step(best: &Scenario) -> Option<Scenario> {
+    shrink_remove_one_event(best, true)
+        .or_else(|| shrink_remove_one_event(best, false))
+        .or_else(|| shrink_remove_one_descriptor(best))
+}
+
+fn shrink_remove_one_event(best: &Scenario, prefix: bool) -> Option<Scenario> {
+    let events = if prefix { &best.prefix } else { &best.suffix };
+    if events.len() <= 1 {
+        return None;
+    }
+    for i in 0..events.len() {
+        let mut candidate = best.clone();
+        if prefix {
+            candidate.prefix.remove(i);
+        } else {
+            candidate.suffix.remove(i);
+        }
+        if check_resume(&candidate).is_err() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn shrink_remove_one_descriptor(best: &Scenario) -> Option<Scenario> {
+    if best.descriptors.len() <= 1 {
+        return None;
+    }
+    for i in 0..best.descriptors.len() {
+        let mut candidate = best.clone();
+        candidate.descriptors.remove(i);
+        let graph_max = candidate
+            .descriptors
+            .iter()
+            .map(|d| usize::from(d.delay))
+            .max()
+            .unwrap_or(0);
+        candidate.buffer_max_delay = candidate.buffer_max_delay.max(graph_max);
+        if check_resume(&candidate).is_err() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 // ── SplitMix64 (deterministic, no extra RNG crate) ────────────────────────────
@@ -673,7 +675,7 @@ fn resume_equivalence_regression_seeds() {
 
 /// Narrow in-flight regression matching `checkpoint_resume_with_spikes_in_flight_matches_live`.
 #[test]
-fn regression_in_flight_delay2_json_and_bincode() {
+fn regression_in_flight_delay2_json_and_postcard() {
     let scenario = Scenario {
         seed: u64::MAX,
         recipe: Recipe::CheckpointBeforeDelivery,
@@ -840,15 +842,15 @@ fn cross_format_restore_equivalence() {
             let _ = apply_event(&mut live, event);
         }
         let from_json = SerdeFormat::Json.restore(&live);
-        let from_bincode = SerdeFormat::Bincode.restore(&live);
+        let from_postcard = SerdeFormat::Postcard.restore(&live);
         meshes_equivalent(&live, &from_json).unwrap();
-        meshes_equivalent(&live, &from_bincode).unwrap();
-        meshes_equivalent(&from_json, &from_bincode).unwrap();
+        meshes_equivalent(&live, &from_postcard).unwrap();
+        meshes_equivalent(&from_json, &from_postcard).unwrap();
 
-        // JSON → bincode → JSON must not drift for a valid checkpoint.
-        let via_bincode = SerdeFormat::Bincode.restore(&from_json);
-        let via_json = SerdeFormat::Json.restore(&from_bincode);
-        meshes_equivalent(&live, &via_bincode).unwrap();
+        // JSON → postcard → JSON must not drift for a valid checkpoint.
+        let via_postcard = SerdeFormat::Postcard.restore(&from_json);
+        let via_json = SerdeFormat::Json.restore(&from_postcard);
+        meshes_equivalent(&live, &via_postcard).unwrap();
         meshes_equivalent(&live, &via_json).unwrap();
     }
 }
@@ -862,7 +864,7 @@ fn cross_format_restore_equivalence() {
 #[test]
 #[ignore = "nightly profile: CHECKPOINT_RESUME_CASES (default 10000) seeded resume-equivalence run"]
 fn resume_equivalence_nightly() {
-    let cases = std::env::var("CHECKPOINT_RESUME_CASES")
+    let cases = std::env::var(NIGHTLY_CASES_ENV)
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(NIGHTLY_CASES_DEFAULT);
