@@ -39,18 +39,20 @@
 //! if the on-failure shrinker prints a smaller scenario, persist that as a
 //! named fixture beside the other boundary tests.
 
+mod compare;
 mod generate;
 mod harness;
+mod recipes;
 
 use synaptic_wiring::mesh::SynapticMesh;
 use synaptic_wiring::topology::SynapticGraph;
 use synaptic_wiring::types::Polarity;
 
+use compare::{SerdeFormat, check_resume, meshes_equivalent};
 use generate::{check_seed, empty_graph};
 use harness::{
     CI_CASES, NIGHTLY_CASES_DEFAULT, NIGHTLY_CASES_ENV, REGRESSION_SEEDS, Recipe, Scenario,
-    SerdeFormat, TickEvent, apply_event, check_resume, checkpoint_snapshot, descriptor,
-    meshes_equivalent,
+    TickEvent, apply_event, checkpoint_snapshot, descriptor,
 };
 
 /// Seeded property suite for default CI: hundreds of generated graphs,
